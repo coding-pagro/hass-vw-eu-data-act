@@ -1,0 +1,61 @@
+"""The Volkswagen EU Data Act integration."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import aiohttp
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
+
+from .api import EudaApiClient
+from .const import CONF_EMAIL, CONF_PASSWORD
+from .coordinator import EudaCoordinator
+
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+
+@dataclass
+class EudaRuntimeData:
+    coordinator: EudaCoordinator
+    session: object
+
+
+type EudaConfigEntry = ConfigEntry[EudaRuntimeData]
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: EudaConfigEntry) -> bool:
+    """Set up VW EU Data Act from a config entry."""
+    # Dedicated, self-managed session with its own cookie jar (auth is
+    # cookie-based). Not created via async_create_clientsession because we own
+    # its lifecycle and close it on unload.
+    session = aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar())
+    try:
+        client = EudaApiClient(session, entry.data[CONF_EMAIL], entry.data[CONF_PASSWORD])
+        coordinator = EudaCoordinator(hass, entry, client)
+
+        await coordinator.async_load_store()
+        await coordinator.async_config_entry_first_refresh()
+
+        entry.runtime_data = EudaRuntimeData(coordinator=coordinator, session=session)
+
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+        # Entities now exist -> backfill historical statistics.
+        await coordinator.async_flush_statistics()
+    except Exception:
+        # Setup failed: HA will not call async_unload_entry, so close the
+        # session here to avoid leaking it (and its connector).
+        await session.close()
+        raise
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: EudaConfigEntry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok and entry.runtime_data:
+        await entry.runtime_data.session.close()
+    return unload_ok

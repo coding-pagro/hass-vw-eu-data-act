@@ -1,0 +1,13 @@
+{
+  "domain": "vw_eu_data_act",
+  "name": "Volkswagen EU Data Act",
+  "version": "0.1.0",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["recorder"],
+  "documentation": "https://github.com/mikrohard/hass-vw-eu-data-act",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/mikrohard/hass-vw-eu-data-act/issues",
+  "requirements": []
+}

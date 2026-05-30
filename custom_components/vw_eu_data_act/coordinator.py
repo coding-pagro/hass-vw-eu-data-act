@@ -1,0 +1,238 @@
+"""Coordinator: dynamic-interval refresh, historical backfill, statistics."""
+from __future__ import annotations
+
+import logging
+from collections import defaultdict
+from datetime import datetime, timezone
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
+
+from .api import ApiError, AuthError, EudaApiClient
+from .const import (
+    CONF_IDENTIFIER,
+    CONF_VIN,
+    DATASET_INTERVAL,
+    DOMAIN,
+    MIN_INTERVAL,
+    NO_CONTENT_SUFFIX,
+    POST_DATASET_BUFFER,
+    RETRY_INTERVAL,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+)
+from .data import CURATED_SENSORS, Dataset, DataPoint
+
+_LOGGER = logging.getLogger(__name__)
+
+# Curated fields we backfill into long-term statistics: numeric "measurement"
+# sensors only. total_increasing sensors (e.g. mileage) are left to the
+# recorder's own sum-based statistics to avoid conflicting metadata.
+_NUMERIC_CURATED = {
+    s.field_name: s
+    for s in CURATED_SENSORS
+    if s.unit and s.state_class == "measurement"
+}
+
+
+def _filename_timestamp(name: str) -> datetime | None:
+    """Parse the leading YYYYMMDDhhmmss in a dataset filename."""
+    stem = name.split("_", 1)[0]
+    try:
+        return datetime.strptime(stem, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _created_on(entry: dict) -> datetime | None:
+    raw = entry.get("createdOn")
+    if not raw:
+        return _filename_timestamp(entry.get("name", ""))
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return _filename_timestamp(entry.get("name", ""))
+
+
+class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
+    """Fetches datasets, backfills history, and reschedules adaptively."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: EudaApiClient) -> None:
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN} {entry.data[CONF_VIN]}",
+            update_interval=RETRY_INTERVAL,
+        )
+        self.entry = entry
+        self.client = client
+        self.vin: str = entry.data[CONF_VIN]
+        self.identifier: str = entry.data[CONF_IDENTIFIER]
+        self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY.format(entry_id=entry.entry_id))
+        self._ingested: set[str] = set()
+        self.entities_ready = False
+        # pending historical numeric points: field -> list[(timestamp, value)]
+        self._pending_stats: dict[str, list[tuple[datetime, float]]] = defaultdict(list)
+        self.latest_dataset: Dataset | None = None
+
+    async def async_load_store(self) -> None:
+        stored = await self._store.async_load() or {}
+        self._ingested = set(stored.get("ingested", []))
+
+    async def _save_store(self) -> None:
+        await self._store.async_save({"ingested": sorted(self._ingested)[-100:]})
+
+    async def _async_update_data(self) -> dict[str, DataPoint]:
+        try:
+            listing = await self.client.async_list_datasets(self.vin, self.identifier)
+        except AuthError as err:
+            raise UpdateFailed(f"Authentication failed: {err}") from err
+        except ApiError as err:
+            raise UpdateFailed(str(err)) from err
+
+        # newest first by createdOn
+        listing = [e for e in listing if e.get("name")]
+        listing.sort(key=lambda e: _created_on(e) or datetime.min.replace(tzinfo=timezone.utc))
+
+        new_files = [
+            e for e in listing
+            if e["name"] not in self._ingested and not e["name"].endswith(NO_CONTENT_SUFFIX)
+        ]
+
+        # remember every name we have seen (incl. no-content) so we don't re-list them
+        for e in listing:
+            self._ingested.add(e["name"])
+
+        found_new = bool(new_files)
+        # backfill oldest -> newest so latest_dataset ends up newest
+        for e in new_files:
+            try:
+                payload = await self.client.async_download_dataset(self.vin, self.identifier, e["name"])
+            except ApiError as err:
+                _LOGGER.warning("Skipping %s: %s", e["name"], err)
+                continue
+            ds = Dataset.from_json(payload)
+            self.latest_dataset = ds
+            self._collect_stats(ds, fallback_ts=_created_on(e))
+
+        if new_files:
+            await self._save_store()
+
+        if self.entities_ready:
+            self._write_statistics()
+
+        # ---- reschedule -------------------------------------------------
+        self._reschedule(listing, found_new)
+
+        if self.latest_dataset is None:
+            if not listing:
+                raise UpdateFailed("No datasets available yet")
+            # nothing decodable but keep prior data if any
+            if self.data:
+                return self.data
+            raise UpdateFailed("No decodable datasets available yet")
+
+        return self.latest_dataset.points
+
+    def _reschedule(self, listing: list[dict], found_new: bool) -> None:
+        if found_new and listing:
+            newest = _created_on(listing[-1])
+            if newest:
+                target = newest + DATASET_INTERVAL + POST_DATASET_BUFFER
+                delta = target - dt_util.utcnow()
+                self.update_interval = delta if delta > MIN_INTERVAL else MIN_INTERVAL
+                _LOGGER.debug("Next refresh in %s (after newest %s)", self.update_interval, newest)
+                return
+        # no new data -> short retry until the next drop appears
+        self.update_interval = RETRY_INTERVAL
+        _LOGGER.debug("No new dataset; retrying in %s", RETRY_INTERVAL)
+
+    # -- statistics --------------------------------------------------------
+
+    def _collect_stats(self, ds: Dataset, fallback_ts: datetime | None) -> None:
+        ts = ds.captured_at or fallback_ts
+        if ts is None:
+            return
+        for field_name, curated in _NUMERIC_CURATED.items():
+            dp = ds.by_field(field_name)
+            if dp is None:
+                continue
+            val = dp.value
+            if curated.transform == "duration_s" and isinstance(val, str):
+                continue
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                continue
+            self._pending_stats[field_name].append((ts, float(val)))
+
+    def _write_statistics(self) -> None:
+        """Flush pending numeric history into HA long-term statistics."""
+        if not self._pending_stats:
+            return
+        try:
+            from homeassistant.components.recorder.models import (
+                StatisticData,
+                StatisticMetaData,
+            )
+            from homeassistant.components.recorder.statistics import (
+                async_import_statistics,
+            )
+            from homeassistant.helpers import entity_registry as er
+        except ImportError:
+            return
+
+        # HA 2025.x replaced the boolean has_mean with mean_type; fall back to
+        # has_mean on older versions that lack StatisticMeanType.
+        try:
+            from homeassistant.components.recorder.models import StatisticMeanType
+
+            mean_meta = {"mean_type": StatisticMeanType.ARITHMETIC}
+        except ImportError:
+            mean_meta = {"has_mean": True}
+
+        registry = er.async_get(self.hass)
+        pending = self._pending_stats
+        self._pending_stats = defaultdict(list)
+
+        for field_name, points in pending.items():
+            curated = _NUMERIC_CURATED[field_name]
+            entity_id = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{self.vin}_{field_name}"
+            )
+            if not entity_id:
+                # entity not created yet; requeue for next flush
+                self._pending_stats[field_name].extend(points)
+                continue
+
+            # bucket by hour (HA long-term statistics are hourly)
+            buckets: dict[datetime, list[float]] = defaultdict(list)
+            for ts, val in points:
+                hour = ts.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+                buckets[hour].append(val)
+
+            stats = [
+                StatisticData(
+                    start=hour,
+                    mean=sum(vals) / len(vals),
+                    min=min(vals),
+                    max=max(vals),
+                )
+                for hour, vals in sorted(buckets.items())
+            ]
+            metadata = StatisticMetaData(
+                has_sum=False,
+                name=None,
+                source="recorder",
+                statistic_id=entity_id,
+                unit_of_measurement=curated.unit,
+                **mean_meta,
+            )
+            async_import_statistics(self.hass, metadata, stats)
+            _LOGGER.debug("Imported %d hourly stats for %s", len(stats), entity_id)
+
+    async def async_flush_statistics(self) -> None:
+        """Called once after platforms are set up to backfill initial history."""
+        self.entities_ready = True
+        self._write_statistics()

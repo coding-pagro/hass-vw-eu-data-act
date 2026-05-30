@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Captured browser session — contains live auth cookies / OAuth codes. Never commit.
+*.har

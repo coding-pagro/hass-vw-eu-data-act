@@ -1,0 +1,109 @@
+"""Sensor platform: curated sensors + raw diagnostic data points."""
+from __future__ import annotations
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import EntityCategory
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from . import EudaConfigEntry
+from .coordinator import EudaCoordinator
+from .data import CURATED_BINARY, CURATED_SENSORS, CuratedSensor, DataPoint
+from .entity import EudaEntity
+
+# fields owned by other platforms / not worth a raw sensor
+_BINARY_FIELDS = {b.field_name for b in CURATED_BINARY}
+_CURATED_SENSOR_FIELDS = {s.field_name for s in CURATED_SENSORS}
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: EudaConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    coordinator = entry.runtime_data.coordinator
+    points: dict[str, DataPoint] = coordinator.data or {}
+    present_fields = {dp.field_name for dp in points.values()}
+
+    entities: list[SensorEntity] = []
+
+    # curated numeric / text sensors (one per field, if present)
+    for curated in CURATED_SENSORS:
+        if curated.field_name in present_fields:
+            entities.append(EudaCuratedSensor(coordinator, curated))
+
+    # raw diagnostic sensors: every other unique key
+    for key, dp in points.items():
+        if dp.field_name in _CURATED_SENSOR_FIELDS or dp.field_name in _BINARY_FIELDS:
+            continue
+        entities.append(EudaRawSensor(coordinator, key))
+
+    async_add_entities(entities)
+
+
+def _find_by_field(points: dict[str, DataPoint], field_name: str) -> DataPoint | None:
+    for dp in points.values():
+        if dp.field_name == field_name:
+            return dp
+    return None
+
+
+class EudaCuratedSensor(EudaEntity, SensorEntity):
+    """A curated, well-typed sensor (enabled by default)."""
+
+    def __init__(self, coordinator: EudaCoordinator, curated: CuratedSensor) -> None:
+        super().__init__(coordinator)
+        self._curated = curated
+        self._attr_unique_id = f"{coordinator.vin}_{curated.field_name}"
+        self._attr_name = curated.name
+        if curated.icon:
+            self._attr_icon = curated.icon
+        if curated.device_class:
+            self._attr_device_class = SensorDeviceClass(curated.device_class)
+        if curated.unit:
+            self._attr_native_unit_of_measurement = curated.unit
+        if curated.state_class:
+            self._attr_state_class = SensorStateClass(curated.state_class)
+
+    @property
+    def native_value(self):
+        dp = _find_by_field(self.coordinator.data or {}, self._curated.field_name)
+        return dp.value if dp else None
+
+
+class EudaRawSensor(EudaEntity, SensorEntity):
+    """A raw data point exposed as a disabled-by-default diagnostic sensor."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: EudaCoordinator, key: str) -> None:
+        super().__init__(coordinator)
+        dp = coordinator.data[key]
+        self._key = key
+        self._attr_unique_id = key
+        self._attr_name = dp.field_name
+        # only attach a unit when the value is numeric
+        if dp.unit and dp.type_hint in ("int", "float"):
+            self._attr_native_unit_of_measurement = dp.unit
+
+    @property
+    def native_value(self):
+        dp = (self.coordinator.data or {}).get(self._key)
+        return dp.value if dp else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        dp = (self.coordinator.data or {}).get(self._key)
+        if not dp:
+            return {}
+        attrs = {"key": dp.key, "field_name": dp.field_name}
+        if dp.description:
+            attrs["description"] = dp.description
+        if dp.cluster:
+            attrs["cluster"] = dp.cluster
+        return attrs
