@@ -37,6 +37,16 @@ _NUMERIC_CURATED = {
     if s.unit and s.state_class == "measurement"
 }
 
+# Maps a curated unit to its HA statistics unit_class (conversion dimension).
+# Units with no converter (e.g. percentage) use None.
+_UNIT_CLASS: dict[str, str | None] = {
+    "kW": "power",
+    "°C": "temperature",
+    "km": "distance",
+    "s": "duration",
+    "%": None,
+}
+
 
 def _filename_timestamp(name: str) -> datetime | None:
     """Parse the leading YYYYMMDDhhmmss in a dataset filename."""
@@ -227,6 +237,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                 source="recorder",
                 statistic_id=entity_id,
                 unit_of_measurement=curated.unit,
+                unit_class=_UNIT_CLASS.get(curated.unit),
                 **mean_meta,
             )
             async_import_statistics(self.hass, metadata, stats)
