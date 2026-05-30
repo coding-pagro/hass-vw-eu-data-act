@@ -17,6 +17,7 @@ from .data import (
     CURATED_SENSORS,
     CuratedSensor,
     DataPoint,
+    friendly_name,
     resolve_distance_unit,
 )
 from .entity import EudaEntity
@@ -109,7 +110,7 @@ class EudaRawSensor(EudaEntity, SensorEntity):
         dp = coordinator.data[key]
         self._key = key
         self._attr_unique_id = key
-        self._attr_name = dp.field_name
+        self._attr_name = friendly_name(dp.field_name, dp.description)
         # only attach a unit when the value is numeric
         if dp.unit and dp.type_hint in ("int", "float"):
             self._attr_native_unit_of_measurement = dp.unit

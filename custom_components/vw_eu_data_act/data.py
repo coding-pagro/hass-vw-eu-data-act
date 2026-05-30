@@ -85,6 +85,47 @@ def parse_value(raw: str | None, type_hint: str | None = None):
 
 
 # ---------------------------------------------------------------------------
+# Enum + naming helpers
+# ---------------------------------------------------------------------------
+
+_ENUM_TOKEN_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+# Bare field names that are meaningless on their own; for these we name the
+# entity from the dictionary description instead.
+_GENERIC_FIELD_NAMES = {"value", "state", "unit", "is_set", "type", "id"}
+
+
+def enum_members(description: str | None) -> list[str]:
+    """Parse an ordered enum member list out of a dictionary description.
+
+    Enum fields document their members as a comma-separated, index-ordered list
+    (e.g. "IMMEDIATE_ACTION_STATE_INVALID, ..."). PDF extraction injects stray
+    spaces inside the tokens, so whitespace is stripped before checking each
+    token looks like an UPPER_SNAKE enum label. Returns [] for prose / non-enum
+    descriptions.
+    """
+    if not description:
+        return []
+    members = [re.sub(r"\s+", "", part) for part in description.split(",")]
+    members = [m for m in members if _ENUM_TOKEN_RE.match(m)]
+    return members if len(members) >= 2 else []
+
+
+def friendly_name(field_name: str, description: str | None = None) -> str:
+    """Entity name for a raw data point.
+
+    Dotted field names are descriptive enough as-is, but some are bare and
+    meaningless ("value", "state", ...). For those, fall back to the dictionary
+    description (first sentence, trimmed).
+    """
+    if field_name.lower() in _GENERIC_FIELD_NAMES and description:
+        text = description.strip().split(".")[0].strip()
+        if text:
+            return text[:60]
+    return field_name
+
+
+# ---------------------------------------------------------------------------
 # Dataset model
 # ---------------------------------------------------------------------------
 
@@ -101,7 +142,14 @@ class DataPoint:
 
     @property
     def value(self):
-        return parse_value(self.raw_value, self.type_hint)
+        v = parse_value(self.raw_value, self.type_hint)
+        # Enum fields occasionally deliver the raw protobuf integer index instead
+        # of the label; resolve it back to the string using the documented members.
+        if self.type_hint == "enum" and isinstance(v, int) and not isinstance(v, bool):
+            members = enum_members(self.description)
+            if 0 <= v < len(members):
+                return members[v]
+        return v
 
 
 @dataclass

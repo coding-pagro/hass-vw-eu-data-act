@@ -178,6 +178,29 @@ def main() -> int:
     unit_dp = ds_mi.by_field("mileage.unit")
     check("resolved unit from dataset", data.resolve_distance_unit(unit_dp.value), "mi")
 
+    # --- (5) friendly names for bare fields ------------------------------
+    print("friendly raw names:")
+    check("bare value -> description", data.friendly_name("value", "Value of the primary range"), "Value of the primary range")
+    check("dotted name kept", data.friendly_name("battery_state_report.soc", "State of charge"), "battery_state_report.soc")
+    check("bare value no desc -> value", data.friendly_name("value", None), "value")
+
+    # --- (6) enum integer fallback resolves to label --------------------
+    print("enum integer fallback:")
+    enum_desc = (
+        "IMMEDIATE_ACTION_STAT E_INVALID, IMMEDIATE_ACTION_STAT E_IMMEDIATE_ACTION_TI ME, "
+        "IMMEDIATE_ACTION_STAT E_IMMEDIATE_CHARGING , IMMEDIATE_ACTION_STAT E_IMMEDIATE_ACTION_ST OPPED, "
+        "IMMEDIATE_ACTION_STAT E_IMMEDIATE_ACTION_R ANGE, IMMEDIATE_ACTION_STAT E_IMMEDIATE_ACTION_S OC, "
+        "IMMEDIATE_ACTION_STAT E_CHARGE_MODE_SELEC TION"
+    )
+    members = data.enum_members(enum_desc)
+    check("parses 7 enum members", len(members), 7)
+    dp_int = data.DataPoint("k", "charging_state_report.immediate_action_state", "6", "enum", None, enum_desc)
+    check("int 6 -> label", dp_int.value, "IMMEDIATE_ACTION_STATE_CHARGE_MODE_SELECTION")
+    dp_str = data.DataPoint("k", "f", "IMMEDIATE_ACTION_STATE_IMMEDIATE_CHARGING", "enum", None, enum_desc)
+    check("string label unchanged", dp_str.value, "IMMEDIATE_ACTION_STATE_IMMEDIATE_CHARGING")
+    dp_prose = data.DataPoint("k", "report_type", "3", "enum", None, "The enum value of report type")
+    check("prose enum desc -> int kept", dp_prose.value, 3)
+
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")
