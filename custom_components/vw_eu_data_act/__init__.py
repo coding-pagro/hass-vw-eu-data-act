@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EudaApiClient
 from .const import CONF_EMAIL, CONF_PASSWORD, CONF_VIN, raw_unique_id
@@ -29,10 +30,15 @@ type EudaConfigEntry = ConfigEntry[EudaRuntimeData]
 
 async def async_setup_entry(hass: HomeAssistant, entry: EudaConfigEntry) -> bool:
     """Set up VW EU Data Act from a config entry."""
-    # Dedicated, self-managed session with its own cookie jar (auth is
-    # cookie-based). Not created via async_create_clientsession because we own
-    # its lifecycle and close it on unload.
-    session = aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar())
+    # Own session (own cookie jar — auth is cookie-based) but reuse Home
+    # Assistant's shared connector so we benefit from its warm DNS cache and are
+    # resilient to transient DNS hiccups. connector_owner=False so closing our
+    # session never closes the shared connector.
+    session = aiohttp.ClientSession(
+        connector=async_get_clientsession(hass).connector,
+        connector_owner=False,
+        cookie_jar=aiohttp.CookieJar(),
+    )
     try:
         # Warm the data-dictionary cache off the event loop (it reads a bundled
         # JSON file) so it doesn't block the loop during dataset parsing.

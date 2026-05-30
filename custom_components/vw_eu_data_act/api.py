@@ -296,15 +296,18 @@ class EudaApiClient:
     # -- authenticated requests -------------------------------------------
 
     async def _get_json(self, url: str, *, headers: dict | None = None, _retry: bool = True):
-        async with await self._get(url, headers=headers) as resp:
-            if resp.status in (401, 403) and _retry:
-                _LOGGER.debug("Session expired (%s) for %s; re-authenticating", resp.status, url)
-                self._logged_in = False
-                await self.async_login()
-                return await self._get_json(url, headers=headers, _retry=False)
-            if resp.status >= 400:
-                raise ApiError(f"GET {url} -> HTTP {resp.status}")
-            text = await resp.text()
+        try:
+            async with await self._get(url, headers=headers) as resp:
+                if resp.status in (401, 403) and _retry:
+                    _LOGGER.debug("Session expired (%s) for %s; re-authenticating", resp.status, url)
+                    self._logged_in = False
+                    await self.async_login()
+                    return await self._get_json(url, headers=headers, _retry=False)
+                if resp.status >= 400:
+                    raise ApiError(f"GET {url} -> HTTP {resp.status}")
+                text = await resp.text()
+        except aiohttp.ClientError as err:
+            raise ApiError(f"Connection error for {url}: {err}") from err
         try:
             return json.loads(text)
         except ValueError as err:
@@ -361,18 +364,21 @@ class EudaApiClient:
             raise ApiError(f"{name} contains no content")
         url = f"{BASE_URL}{DOWNLOAD_PATH.format(vin=vin, identifier=identifier)}"
         headers = {"filename": name, "type": "partial"}
-        async with await self._get(url, headers=headers) as resp:
-            if resp.status in (401, 403):
-                self._logged_in = False
-                await self.async_login()
-                async with await self._get(url, headers=headers) as resp2:
-                    if resp2.status >= 400:
-                        raise ApiError(f"Download {name} -> HTTP {resp2.status}")
-                    raw = await resp2.read()
-            elif resp.status >= 400:
-                raise ApiError(f"Download {name} -> HTTP {resp.status}")
-            else:
-                raw = await resp.read()
+        try:
+            async with await self._get(url, headers=headers) as resp:
+                if resp.status in (401, 403):
+                    self._logged_in = False
+                    await self.async_login()
+                    async with await self._get(url, headers=headers) as resp2:
+                        if resp2.status >= 400:
+                            raise ApiError(f"Download {name} -> HTTP {resp2.status}")
+                        raw = await resp2.read()
+                elif resp.status >= 400:
+                    raise ApiError(f"Download {name} -> HTTP {resp.status}")
+                else:
+                    raw = await resp.read()
+        except aiohttp.ClientError as err:
+            raise ApiError(f"Connection error downloading {name}: {err}") from err
         return self._unzip_json(raw, name)
 
     @staticmethod
