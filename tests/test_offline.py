@@ -162,6 +162,22 @@ def main() -> int:
     check("html-input _csrf not overridden", fe.get("_csrf"), "HC")
     check("html-input action", ae, "/x/login/identifier")
 
+    # --- distance unit resolved from companion *.unit field --------------
+    print("distance unit resolution:")
+    check("MILES -> mi", data.resolve_distance_unit("MILES"), "mi")
+    check("KM -> km", data.resolve_distance_unit("KM"), "km")
+    check("lowercase miles -> mi", data.resolve_distance_unit("miles"), "mi")
+    check("unknown -> None", data.resolve_distance_unit("LIGHTYEARS"), None)
+    mileage = next(s for s in data.CURATED_SENSORS if s.field_name == "mileage.value")
+    check("mileage declares unit_field", mileage.unit_field, "mileage.unit")
+    # a miles dataset exposes mileage.unit so the sensor can pick "mi"
+    ds_mi = data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+        {"key": "m1", "dataFieldName": "mileage.value", "value": "43531"},
+        {"key": "m2", "dataFieldName": "mileage.unit", "value": "MILES"},
+    ]})
+    unit_dp = ds_mi.by_field("mileage.unit")
+    check("resolved unit from dataset", data.resolve_distance_unit(unit_dp.value), "mi")
+
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")

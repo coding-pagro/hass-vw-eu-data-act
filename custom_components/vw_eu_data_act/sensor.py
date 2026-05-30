@@ -12,7 +12,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import EudaConfigEntry
 from .coordinator import EudaCoordinator
-from .data import CURATED_BINARY, CURATED_SENSORS, CuratedSensor, DataPoint
+from .data import (
+    CURATED_BINARY,
+    CURATED_SENSORS,
+    CuratedSensor,
+    DataPoint,
+    resolve_distance_unit,
+)
 from .entity import EudaEntity
 
 # fields owned by other platforms / not worth a raw sensor
@@ -69,8 +75,6 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
             self._attr_icon = curated.icon
         if curated.device_class:
             self._attr_device_class = SensorDeviceClass(curated.device_class)
-        if curated.unit:
-            self._attr_native_unit_of_measurement = curated.unit
         if curated.state_class:
             self._attr_state_class = SensorStateClass(curated.state_class)
 
@@ -78,6 +82,20 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
     def native_value(self):
         dp = _find_by_field(self.coordinator.data or {}, self._curated.field_name)
         return dp.value if dp else None
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        # When a companion unit field is declared (e.g. mileage.unit), resolve
+        # the unit at runtime so miles vs km is reported correctly per vehicle;
+        # otherwise use the static curated unit.
+        cur = self._curated
+        if cur.unit_field:
+            dp = _find_by_field(self.coordinator.data or {}, cur.unit_field)
+            if dp is not None:
+                resolved = resolve_distance_unit(dp.value)
+                if resolved:
+                    return resolved
+        return cur.unit
 
 
 class EudaRawSensor(EudaEntity, SensorEntity):

@@ -182,6 +182,27 @@ def _parse_timestamp(raw: str) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
+# Distance unit enums (e.g. mileage.unit) -> HA unit. The portal reports
+# mileage/range in either miles or kilometres depending on the vehicle, so the
+# unit must not be hardcoded; it is read from a companion "*.unit" field.
+DISTANCE_UNIT_BY_ENUM: dict[str, str] = {
+    "MILES": "mi",
+    "MILE": "mi",
+    "KM": "km",
+    "KILOMETER": "km",
+    "KILOMETERS": "km",
+    "KILOMETRE": "km",
+    "KILOMETRES": "km",
+}
+
+
+def resolve_distance_unit(enum_value, default: str | None = None) -> str | None:
+    """Map a distance-unit enum value (e.g. "MILES") to an HA unit ("mi")."""
+    if isinstance(enum_value, str):
+        return DISTANCE_UNIT_BY_ENUM.get(enum_value.strip().upper(), default)
+    return default
+
+
 @dataclass(frozen=True)
 class CuratedSensor:
     field_name: str
@@ -192,6 +213,9 @@ class CuratedSensor:
     icon: str | None = None
     # transform: "duration_s" converts "0s" -> seconds; None keeps parse_value
     transform: str | None = None
+    # companion field holding the unit enum (e.g. "mileage.unit"); when set, the
+    # sensor's unit is resolved from it at runtime, falling back to ``unit``.
+    unit_field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -209,7 +233,7 @@ CURATED_SENSORS: tuple[CuratedSensor, ...] = (
     CuratedSensor("settings.target_soc", "Target charge level", None, "%", "measurement", icon="mdi:battery-charging-80"),
     CuratedSensor("battery_state_report.charge_bulk_threshold", "Charge bulk threshold", None, "%", "measurement", icon="mdi:battery-charging-100"),
     CuratedSensor("battery_state_report.charge_power", "Charge power", "power", "kW", "measurement"),
-    CuratedSensor("mileage.value", "Mileage", "distance", "km", "total_increasing", icon="mdi:counter"),
+    CuratedSensor("mileage.value", "Mileage", "distance", "km", "total_increasing", icon="mdi:counter", unit_field="mileage.unit"),
     CuratedSensor("min_temperature", "Climate min temperature", "temperature", "°C", "measurement"),
     CuratedSensor("max_temperature", "Climate max temperature", "temperature", "°C", "measurement"),
     CuratedSensor("remaining_climate_time", "Remaining climate time", "duration", "s", "measurement", transform="duration_s"),
