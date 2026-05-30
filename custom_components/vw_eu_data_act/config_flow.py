@@ -69,7 +69,11 @@ class EudaConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             vin = user_input[CONF_VIN]
-            await self.async_set_unique_id(vin)
+            # The VIN is only known at this late step, so don't abort on a
+            # leftover/abandoned in-progress flow for the same VIN (that would
+            # permanently block re-adding until a HA restart). Duplicate config
+            # entries are still prevented by _abort_if_unique_id_configured().
+            await self.async_set_unique_id(vin, raise_on_progress=False)
             self._abort_if_unique_id_configured()
             try:
                 identifier, nickname = await self._async_fetch_identifier(vin)
