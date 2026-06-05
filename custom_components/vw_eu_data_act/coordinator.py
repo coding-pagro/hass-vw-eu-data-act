@@ -118,7 +118,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                     )
 
                     if is_server_error and attempt < max_retries - 1:
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Server error downloading %s (attempt %d/%d): %s, retrying in %ds",
                             dataset_entry["name"],
                             attempt + 1,
@@ -129,7 +129,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                         await asyncio.sleep(retry_delay)
                         continue
                     elif is_server_error:
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Server error downloading %s after %d attempts: %s, trying previous dataset",
                             dataset_entry["name"],
                             max_retries,
@@ -137,7 +137,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                         )
                         break
                     else:
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Error downloading %s: %s", dataset_entry["name"], err
                         )
                         break
@@ -155,7 +155,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
         if last_error:
             self.update_interval = RETRY_INTERVAL
             if self.data:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Could not download any dataset (last error: %s), keeping previous data",
                     last_error,
                 )
@@ -223,7 +223,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
 
                     # Retry server errors with delay
                     if is_server_error and attempt < max_retries - 1:
-                        _LOGGER.warning(
+                        _LOGGER.debug(
                             "Server error listing datasets (attempt %d/%d): %s, retrying in %ds",
                             attempt + 1,
                             max_retries,
