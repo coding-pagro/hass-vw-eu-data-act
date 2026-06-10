@@ -127,8 +127,7 @@ logger:
 > non-browser clients, so the integration builds the OIDC `authorize` URL
 > directly. If login fails, make sure you selected the **correct brand** in the
 > setup flow — each VW Group brand uses a different OIDC client ID and identity
-> flow. The login `state` is assembled as `de__en__{BRAND}` (country/language
-> defaults in `const.py`).
+> flow.
 
 ## Updating the data dictionary
 
