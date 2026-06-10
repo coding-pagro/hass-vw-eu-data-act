@@ -140,6 +140,7 @@ class EudaConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self, entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
+        self._brand = entry_data.get(CONF_BRAND, DEFAULT_BRAND)
         self._email = entry_data[CONF_EMAIL]
         return await self.async_step_reauth_confirm()
 
