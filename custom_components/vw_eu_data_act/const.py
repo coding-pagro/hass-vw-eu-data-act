@@ -48,6 +48,9 @@ BRANDS: dict[str, dict[str, str]] = {
         "client_id": "3ea88bf9-1d4e-4a68-b3ad-4098c1f1d246@apps_vw-dilab_com",
         "state": "SKODA",
     },
+    # SEAT and CUPRA intentionally share one client_id (CUPRA runs on SEAT's
+    # identity backend); they differ only by the state suffix. Matches evcc
+    # (vehicle/vw/eudataact/types.go) — not a copy-paste slip.
     "seat": {
         "display_name": "SEAT",
         "client_id": "f85e5b69-e3b2-43aa-9c0d-1b7d0e0b576f@apps_vw-dilab_com",
