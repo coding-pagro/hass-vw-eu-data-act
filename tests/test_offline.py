@@ -248,6 +248,42 @@ def main() -> int:
     dp_prose = data.DataPoint("k", "report_type", "3", "enum", None, "The enum value of report type")
     check("prose enum desc -> int kept", dp_prose.value, 3)
 
+    # --- timestamps: parsing + dataset freshness --------------------------
+    print("timestamps:")
+    from datetime import datetime, timezone
+
+    pt = data._parse_timestamp
+    check("iso Z", pt("2026-06-11T04:47:48Z"), datetime(2026, 6, 11, 4, 47, 48, tzinfo=timezone.utc))
+    check(
+        "iso offset kept",
+        pt("2026-06-11T06:47:46.000+02:00").astimezone(timezone.utc),
+        datetime(2026, 6, 11, 4, 47, 46, tzinfo=timezone.utc),
+    )
+    # offset-less ISO is documented as UTC -> must come back tz-aware
+    check("naive iso -> aware utc", pt("2026-06-11T04:47:48"), datetime(2026, 6, 11, 4, 47, 48, tzinfo=timezone.utc))
+    check("epoch millis", pt("1781153273564"), datetime(2026, 6, 11, 4, 47, 53, 564000, tzinfo=timezone.utc))
+    check("epoch seconds", pt("1781153273"), datetime(2026, 6, 11, 4, 47, 53, tzinfo=timezone.utc))
+    check("garbage -> None", pt("VALID"), None)
+    check("short int -> None", pt("70790"), None)
+
+    # latest_captured_time: max across flat, dotted and epoch variants, and
+    # mixed offsets must compare without raising (all values are tz-aware).
+    ds_ts = data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+        {"key": "t1", "dataFieldName": "car_captured_time", "value": "2026-06-11T04:47:48Z"},
+        {"key": "t2", "dataFieldName": "profile_state_report.car_captured_time", "value": "2026-06-11T06:50:00.000+02:00"},
+        {"key": "t3", "dataFieldName": "car_captured_utc_timestamp", "value": "1781153273"},
+        {"key": "t4", "dataFieldName": "timestamp", "value": "2026-06-11T23:59:59Z"},
+        {"key": "t5", "dataFieldName": "mileage.value", "value": "70790"},
+    ]})
+    # t2 (04:50 UTC) is newest among captured-time fields; the unrelated
+    # "timestamp" field (t4) must not be picked up.
+    check(
+        "captured_at = max of captured fields only",
+        ds_ts.captured_at,
+        datetime(2026, 6, 11, 4, 50, tzinfo=timezone.utc),
+    )
+    check("no captured fields -> None", data.latest_captured_time({}), None)
+
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")

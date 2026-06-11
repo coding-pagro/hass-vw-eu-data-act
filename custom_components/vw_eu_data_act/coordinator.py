@@ -82,6 +82,9 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
         self.vin: str = entry.data[CONF_VIN]
         self.identifier: str = entry.data[CONF_IDENTIFIER]
         self.latest_dataset: Dataset | None = None
+        # createdOn of the newest successfully downloaded dataset (portal-side
+        # freshness, as opposed to Dataset.captured_at = car-side freshness).
+        self.dataset_created_at: datetime | None = None
         self._is_initial_setup: bool = True
 
     async def _async_update_data(self) -> dict[str, DataPoint]:
@@ -124,6 +127,9 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                         self.vin, self.identifier, dataset_entry["name"]
                     )
                     self.latest_dataset = Dataset.from_json(payload)
+                    self.dataset_created_at = (
+                        _created_on(dataset_entry) or self.dataset_created_at
+                    )
                     self._is_initial_setup = False
                     last_error = None
                     break  # Success!

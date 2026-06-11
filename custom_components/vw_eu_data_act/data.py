@@ -197,14 +197,13 @@ class Dataset:
     def from_json(cls, payload: dict) -> "Dataset":
         dictionary = load_dictionary()
         points: dict[str, DataPoint] = {}
-        captured: list[datetime] = []
         for item in payload.get("Data", []):
             key = item.get("key")
             if not key:
                 continue
             meta = dictionary.get(key, {})
             field_name = item.get("dataFieldName") or meta.get("name") or key
-            dp = DataPoint(
+            points[key] = DataPoint(
                 key=key,
                 field_name=field_name,
                 raw_value=item.get("value", ""),
@@ -214,16 +213,11 @@ class Dataset:
                 cluster=meta.get("cluster") or None,
                 timestamp_utc=item.get("timestampUtc") or None,
             )
-            points[key] = dp
-            if field_name == "car_captured_time":
-                ts = _parse_timestamp(dp.raw_value)
-                if ts:
-                    captured.append(ts)
         return cls(
             vin=payload.get("vin", ""),
             user_id=payload.get("user_id"),
             points=points,
-            captured_at=max(captured) if captured else None,
+            captured_at=latest_captured_time(points),
         )
 
     def by_field(self, field_name: str) -> DataPoint | None:
@@ -249,20 +243,54 @@ def find_by_field(
 
 
 def _parse_timestamp(raw: str) -> datetime | None:
-    """Parse the various timestamp encodings seen in datasets."""
+    """Parse the various timestamp encodings seen in datasets.
+
+    Handles ISO 8601 (Z suffix, explicit offset, or none — the data dictionary
+    documents offset-less times as UTC), epoch milliseconds (>= 12 digits) and
+    epoch seconds (10 digits, e.g. car_captured_utc_timestamp). Always returns
+    a timezone-aware datetime so values can be compared and fed to HA timestamp
+    sensors.
+    """
     s = (raw or "").strip()
     if not s:
         return None
-    # epoch millis
-    if _INT_RE.match(s) and len(s) >= 12:
+    if _INT_RE.match(s):
         try:
-            return datetime.fromtimestamp(int(s) / 1000, tz=timezone.utc)
+            if len(s) >= 12:  # epoch millis
+                return datetime.fromtimestamp(int(s) / 1000, tz=timezone.utc)
+            if len(s) == 10:  # epoch seconds (covers 2001-2286)
+                return datetime.fromtimestamp(int(s), tz=timezone.utc)
         except (ValueError, OSError):
             return None
+        return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+# Fields that say when the car last sent a report to the backend. They appear
+# flat (car_captured_time), dotted (profile_state_report.car_captured_time) and
+# as epoch seconds on older models (car_captured_utc_timestamp).
+_CAPTURED_TIME_NAMES = ("car_captured_time", "car_captured_utc_timestamp")
+
+
+def latest_captured_time(points: dict[str, "DataPoint"]) -> datetime | None:
+    """Newest car-to-backend timestamp across all report snapshots.
+
+    The portal merges several report snapshots into one dataset, each carrying
+    its own captured time; the maximum is the last time the vehicle itself was
+    heard from — the actual freshness of the values, as opposed to when the
+    portal generated the dataset file.
+    """
+    times = [
+        ts
+        for dp in points.values()
+        if dp.field_name.rsplit(".", 1)[-1] in _CAPTURED_TIME_NAMES
+        and (ts := _parse_timestamp(dp.raw_value))
+    ]
+    return max(times) if times else None
 
 
 # ---------------------------------------------------------------------------

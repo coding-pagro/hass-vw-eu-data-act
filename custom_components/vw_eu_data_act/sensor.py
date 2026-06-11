@@ -27,6 +27,7 @@ from .data import (
     detect_dataset_format,
     find_by_field,
     friendly_name,
+    latest_captured_time,
     resolve_distance_unit,
 )
 from .entity import EudaEntity
@@ -118,6 +119,11 @@ async def async_setup_entry(
             continue
         entities.append(EudaRawSensor(coordinator, key))
 
+    # dataset-level freshness sensors
+    if latest_captured_time(points) is not None:
+        entities.append(EudaLastVehicleUpdateSensor(coordinator))
+    entities.append(EudaDatasetGeneratedSensor(coordinator))
+
     async_add_entities(entities)
 
 
@@ -191,6 +197,45 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
                 if resolved:
                     return resolved
         return cur.unit
+
+
+class EudaLastVehicleUpdateSensor(EudaEntity, SensorEntity):
+    """Newest car-to-backend timestamp in the data: how fresh the values are.
+
+    Distinct from the entity's own last_updated (which only tracks portal
+    polls): the portal keeps producing datasets while a parked car stays
+    silent, so only the car_captured_time fields say when the vehicle itself
+    last reported.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:car-clock"
+
+    def __init__(self, coordinator: EudaCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.vin}_last_vehicle_update"
+        self._attr_name = "Last vehicle update"
+
+    @property
+    def native_value(self):
+        return self._sticky(latest_captured_time(self.coordinator.data or {}))
+
+
+class EudaDatasetGeneratedSensor(EudaEntity, SensorEntity):
+    """When the portal generated the newest downloaded dataset."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:database-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: EudaCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.vin}_dataset_generated"
+        self._attr_name = "Dataset generated"
+
+    @property
+    def native_value(self):
+        return self._sticky(self.coordinator.dataset_created_at)
 
 
 class EudaRawSensor(EudaEntity, SensorEntity):
