@@ -19,8 +19,6 @@ def raw_unique_id(vin: str, key: str) -> str:
 BASE_URL = "https://eu-data-act.drivesomethinggreater.com"
 IDENTITY_BASE = "https://identity.vwgroup.io"
 
-CALLBACK_LOGIN_PATH = "/services/callbacklogin"
-
 # OIDC: we build the authorize URL directly instead of using the portal's
 # /services/redirect/authentication servlet, which returns HTTP 500 for
 # non-browser clients (it depends on AEM browser session state).
@@ -86,10 +84,6 @@ def get_oidc_state(brand: str = DEFAULT_BRAND) -> str:
     brand_state = BRANDS.get(brand, BRANDS[DEFAULT_BRAND])["state"]
     return f"{DEFAULT_COUNTRY}__{DEFAULT_LANGUAGE}__{brand_state}"
 
-
-# Legacy constants for backward compatibility (default to VW)
-OIDC_CLIENT_ID = BRANDS[DEFAULT_BRAND]["client_id"]
-OIDC_STATE = get_oidc_state(DEFAULT_BRAND)
 
 # proxy_api paths (relative to BASE_URL)
 VEHICLES_PATH = "/proxy_api/consent/me/vehicles"

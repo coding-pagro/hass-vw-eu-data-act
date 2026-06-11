@@ -473,7 +473,9 @@ class CuratedSensor:
     unit: str | None = None
     state_class: str | None = None
     icon: str | None = None
-    # transform: "duration_s" converts "0s" -> seconds; None keeps parse_value
+    # Named value transform applied in sensor.py: "decikelvin_to_celsius",
+    # "abs" or "fuel_consumption"; None keeps parse_value's typing. Durations
+    # like "1800s" need no transform - parse_value already yields seconds.
     transform: str | None = None
     # companion field holding the unit enum (e.g. "mileage.unit"); when set, the
     # sensor's unit is resolved from it at runtime, falling back to ``unit``.
@@ -590,7 +592,6 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         "duration",
         "s",
         "measurement",
-        transform="duration_s",
         icon="mdi:battery-clock",
     ),
     CuratedSensor(
@@ -599,7 +600,6 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         "duration",
         "s",
         "measurement",
-        transform="duration_s",
         icon="mdi:battery-clock",
     ),
     # === Distance & Range ===
@@ -632,7 +632,6 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         "duration",
         "s",
         "measurement",
-        transform="duration_s",
     ),
     CuratedSensor(
         "residual_energy_in_percent",
@@ -802,7 +801,6 @@ CURATED_SENSORS_FLAT: tuple[CuratedSensor, ...] = (
         "duration",
         "s",
         "measurement",
-        transform="duration_s",
     ),
     CuratedSensor(
         "residual_energy_in_percent",
