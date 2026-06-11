@@ -41,5 +41,367 @@
       "auth": "Authentifizierung fehlgeschlagen; bitte die Integration erneut hinzufügen.",
       "reauth_successful": "Erneute Authentifizierung erfolgreich."
     }
+  },
+  "entity": {
+    "sensor": {
+      "battery_state_report_charge_bulk_threshold": {
+        "name": "Schwelle Hauptladephase"
+      },
+      "battery_state_report_charge_energy": {
+        "name": "Geladene Energie"
+      },
+      "battery_state_report_charge_power": {
+        "name": "Ladeleistung"
+      },
+      "battery_state_report_charge_rate": {
+        "name": "Ladegeschwindigkeit"
+      },
+      "battery_state_report_remaining_charging_time_bulk": {
+        "name": "Restzeit Hauptladephase"
+      },
+      "battery_state_report_remaining_charging_time_complete": {
+        "name": "Restladezeit"
+      },
+      "battery_state_report_soc": {
+        "name": "Batterie"
+      },
+      "bem_level": {
+        "name": "BEM-Level"
+      },
+      "charging_state_report_charge_mode": {
+        "name": "Lademodus",
+        "state": {
+          "extended_profile": "Erweitert (Profil)",
+          "extended_stopped": "Erweitert gestoppt",
+          "immediately_default": "Sofortladen",
+          "immediately_profile": "Sofortladen (Profil)",
+          "immediately_stopped": "Sofortladen gestoppt"
+        }
+      },
+      "charging_state_report_charge_type": {
+        "name": "Ladeart",
+        "state": {
+          "ac": "AC",
+          "dc": "DC",
+          "off": "Aus"
+        }
+      },
+      "charging_state_report_charging_scenario": {
+        "name": "Ladeszenario",
+        "state": {
+          "charging_to_departure_time_active": "Laden bis Abfahrtszeit aktiv",
+          "charging_to_departure_time_finished": "Laden bis Abfahrtszeit abgeschlossen",
+          "immediately_charging_active": "Sofortladen aktiv",
+          "immediately_charging_finished": "Sofortladen abgeschlossen",
+          "off": "Aus",
+          "optimised_charging_ac": "Optimiertes AC-Laden",
+          "optimised_charging_finished": "Optimiertes Laden abgeschlossen"
+        }
+      },
+      "charging_state_report_current_charge_state": {
+        "name": "Ladestatus",
+        "state": {
+          "charge_purpose_reached_and_conservation": "Ladeziel erreicht (Erhaltung)",
+          "charge_purpose_reached_and_not_conservation_charging": "Ladeziel erreicht",
+          "charging_error": "Ladefehler",
+          "charging_hv_battery": "Lädt HV-Batterie",
+          "conservation_charging": "Erhaltungsladen",
+          "discharging": "Entladen",
+          "not_ready_for_charging": "Nicht ladebereit",
+          "ready_for_charging": "Ladebereit"
+        }
+      },
+      "charging_state_report_immediate_action_state": {
+        "name": "Ladeaktion",
+        "state": {
+          "charge_mode_selection": "Lademodus-Auswahl",
+          "immediate_action_range": "Sofortaktion: Reichweite",
+          "immediate_action_soc": "Sofortaktion: Ladestand",
+          "immediate_action_stopped": "Sofortaktion gestoppt",
+          "immediate_action_time": "Sofortaktion: Zeit",
+          "immediate_charging": "Sofortladen",
+          "invalid": "Ungültig"
+        }
+      },
+      "cng_gas_level": {
+        "name": "CNG-Füllstand"
+      },
+      "cruising_range_combined": {
+        "name": "Reichweite (kombiniert)"
+      },
+      "cruising_range_primary_engine": {
+        "name": "Reichweite (primär)"
+      },
+      "cruising_range_secondary_engine": {
+        "name": "Reichweite (sekundär)"
+      },
+      "dataset_generated": {
+        "name": "Datensatz erstellt"
+      },
+      "fuel_level_accuracy": {
+        "name": "Tankfüllstand (Genauigkeit)"
+      },
+      "fuel_level_current_level": {
+        "name": "Tankfüllstand"
+      },
+      "last_vehicle_update": {
+        "name": "Letzte Fahrzeugmeldung"
+      },
+      "long_term_data_average_fuel_consumption": {
+        "name": "Ø Verbrauch (Langzeit)"
+      },
+      "long_term_data_average_speed": {
+        "name": "Ø Geschwindigkeit (Langzeit)"
+      },
+      "long_term_data_mileage": {
+        "name": "Fahrstrecke (Langzeit)"
+      },
+      "long_term_data_start_mileage": {
+        "name": "Start-Kilometerstand (Langzeit)"
+      },
+      "long_term_data_travel_time": {
+        "name": "Fahrzeit (Langzeit)"
+      },
+      "maintenance_interval_distance_until_inspection": {
+        "name": "Strecke bis Inspektion"
+      },
+      "maintenance_interval_distance_until_oil_change": {
+        "name": "Strecke bis Ölwechsel"
+      },
+      "maintenance_interval_time_until_inspection": {
+        "name": "Zeit bis Inspektion"
+      },
+      "maintenance_interval_time_until_oil_change": {
+        "name": "Zeit bis Ölwechsel"
+      },
+      "max_temperature": {
+        "name": "Batterietemperatur max."
+      },
+      "mileage": {
+        "name": "Kilometerstand"
+      },
+      "mileage_timestamp": {
+        "name": "Zuletzt verbunden"
+      },
+      "mileage_value": {
+        "name": "Kilometerstand"
+      },
+      "mileage_value_timestamp": {
+        "name": "Zuletzt verbunden"
+      },
+      "min_temperature": {
+        "name": "Batterietemperatur min."
+      },
+      "oil_level_actual_level": {
+        "name": "Ölstand"
+      },
+      "oil_level_additional_oil_level": {
+        "name": "Zusätzlicher Ölstand"
+      },
+      "oil_level_dipstick_indicator_function": {
+        "name": "Ölmessstab-Anzeige"
+      },
+      "oil_level_total_max": {
+        "name": "Max. Ölstand"
+      },
+      "outside_temperature": {
+        "name": "Außentemperatur"
+      },
+      "position_front_left_door_window_lifter": {
+        "name": "Fensterposition vorne links"
+      },
+      "position_front_right_door_window_lifter": {
+        "name": "Fensterposition vorne rechts"
+      },
+      "position_rear_left_door_window_lifter": {
+        "name": "Fensterposition hinten links"
+      },
+      "position_rear_right_door_window_lifter": {
+        "name": "Fensterposition hinten rechts"
+      },
+      "position_sunroof_motor_hood_1": {
+        "name": "Schiebedachposition"
+      },
+      "range": {
+        "name": "Elektrische Reichweite"
+      },
+      "range_value": {
+        "name": "Elektrische Reichweite"
+      },
+      "remaining_climate_time": {
+        "name": "Restzeit Klimatisierung"
+      },
+      "residual_energy_in_percent": {
+        "name": "Restenergie"
+      },
+      "scr_range": {
+        "name": "SCR-Reichweite"
+      },
+      "settings_charge_mode_selection": {
+        "name": "Lademodus-Auswahl",
+        "state": {
+          "home_storage_charging": "Heimspeicher-Laden",
+          "immediate_discharging": "Sofort-Entladen",
+          "immediatecharging": "Sofortladen",
+          "invalid": "Ungültig",
+          "only_own_current": "Nur eigener Strom",
+          "preferred_charging_times": "Bevorzugte Ladezeiten",
+          "timer_charging_climatization": "Timer-Laden + Klimatisierung",
+          "timercharging": "Timer-Laden"
+        }
+      },
+      "settings_max_charge_current_ac": {
+        "name": "Max. AC-Ladestrom",
+        "state": {
+          "invalid": "Ungültig",
+          "max_charge_current_invalid": "Ungültig",
+          "max_charge_current_maximum": "Maximum",
+          "max_charge_current_reduced": "Reduziert",
+          "maximum": "Maximum",
+          "reduced": "Reduziert"
+        }
+      },
+      "settings_target_soc": {
+        "name": "Ziel-Ladestand"
+      },
+      "short_term_data_average_fuel_consumption": {
+        "name": "Ø Verbrauch (Kurzzeit)"
+      },
+      "short_term_data_mileage": {
+        "name": "Fahrstrecke (Kurzzeit)"
+      },
+      "short_term_data_start_mileage": {
+        "name": "Start-Kilometerstand (Kurzzeit)"
+      },
+      "short_term_data_travel_time": {
+        "name": "Fahrzeit (Kurzzeit)"
+      },
+      "tyre_pressure_actual_front_left": {
+        "name": "Reifendruck vorne links"
+      },
+      "tyre_pressure_actual_front_right": {
+        "name": "Reifendruck vorne rechts"
+      },
+      "tyre_pressure_actual_rear_left": {
+        "name": "Reifendruck hinten links"
+      },
+      "tyre_pressure_actual_rear_right": {
+        "name": "Reifendruck hinten rechts"
+      },
+      "tyre_pressure_actual_spare_tyre": {
+        "name": "Reifendruck Reserverad"
+      },
+      "tyre_pressure_differential_front_left": {
+        "name": "Reifendruck-Differenz vorne links"
+      },
+      "tyre_pressure_differential_front_right": {
+        "name": "Reifendruck-Differenz vorne rechts"
+      },
+      "tyre_pressure_differential_rear_left": {
+        "name": "Reifendruck-Differenz hinten links"
+      },
+      "tyre_pressure_differential_rear_right": {
+        "name": "Reifendruck-Differenz hinten rechts"
+      },
+      "tyre_pressure_differential_spare_tyre": {
+        "name": "Reifendruck-Differenz Reserverad"
+      },
+      "window_heating_state": {
+        "name": "Scheibenheizung",
+        "state": {
+          "off": "Aus",
+          "on": "Ein"
+        }
+      }
+    },
+    "binary_sensor": {
+      "locked": {
+        "name": "Fahrzeug verriegelt"
+      },
+      "locked_state_front_engine_bonnet": {
+        "name": "Schloss Motorhaube"
+      },
+      "locked_state_front_left_door": {
+        "name": "Schloss vorne links"
+      },
+      "locked_state_front_right_door": {
+        "name": "Schloss vorne rechts"
+      },
+      "locked_state_rear_left_door": {
+        "name": "Schloss hinten links"
+      },
+      "locked_state_rear_right_door": {
+        "name": "Schloss hinten rechts"
+      },
+      "locked_state_tailgate": {
+        "name": "Schloss Heckklappe"
+      },
+      "open_state_front_engine_bonnet": {
+        "name": "Motorhaube"
+      },
+      "open_state_front_left_door": {
+        "name": "Tür vorne links"
+      },
+      "open_state_front_right_door": {
+        "name": "Tür vorne rechts"
+      },
+      "open_state_rear_left_door": {
+        "name": "Tür hinten links"
+      },
+      "open_state_rear_right_door": {
+        "name": "Tür hinten rechts"
+      },
+      "open_state_tailgate": {
+        "name": "Heckklappe"
+      },
+      "parking_brake": {
+        "name": "Parkbremse"
+      },
+      "parking_lights": {
+        "name": "Parklicht"
+      },
+      "safe_state_front_engine_bonnet": {
+        "name": "Safe Motorhaube"
+      },
+      "safe_state_front_right_door": {
+        "name": "Safe vorne rechts"
+      },
+      "safe_state_rear_left_door": {
+        "name": "Safe hinten links"
+      },
+      "safe_state_rear_right_door": {
+        "name": "Safe hinten rechts"
+      },
+      "safe_state_tailgate": {
+        "name": "Safe Heckklappe"
+      },
+      "state_front_left_door_window_lifter": {
+        "name": "Fenster vorne links"
+      },
+      "state_front_right_door_window_lifter": {
+        "name": "Fenster vorne rechts"
+      },
+      "state_of_hood": {
+        "name": "Motorhaubenstatus"
+      },
+      "state_rear_left_door_window_lifter": {
+        "name": "Fenster hinten links"
+      },
+      "state_rear_right_door_window_lifter": {
+        "name": "Fenster hinten rechts"
+      },
+      "state_service_hatch": {
+        "name": "Serviceklappe"
+      },
+      "state_spoiler": {
+        "name": "Spoiler"
+      },
+      "state_sunroof_motor_hood_1": {
+        "name": "Schiebedach"
+      },
+      "state_sunroof_motor_hood_3": {
+        "name": "Schiebedachmotor 3"
+      }
+    }
   }
 }

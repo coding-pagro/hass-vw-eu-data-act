@@ -284,6 +284,79 @@ def main() -> int:
     )
     check("no captured fields -> None", data.latest_captured_time({}), None)
 
+    # --- enum label shortening + option keys ------------------------------
+    print("enum shortening:")
+    sh = data.shorten_enum_label
+    check(
+        "charge_state prefix stripped",
+        sh("charging_state_report.current_charge_state", "CHARGE_STATE_CHARGING_HV_BATTERY"),
+        "CHARGING_HV_BATTERY",
+    )
+    check(
+        "settings prefix stripped",
+        sh("settings.charge_mode_selection", "CHARGE_MODE_SELECTION_IMMEDIATECHARGING"),
+        "IMMEDIATECHARGING",
+    )
+    check("mixed case untouched", sh("f", "Normal text"), "Normal text")
+    check("number untouched", sh("f", 42), 42)
+    check(
+        "live AC variant shortens fully",
+        data.enum_option_key("settings.max_charge_current_ac", "MAX_CHARGE_CURRENT_AC_MAXIMUM"),
+        "maximum",
+    )
+    check(
+        "translation key dotted",
+        data.entity_translation_key("battery_state_report.soc"),
+        "battery_state_report_soc",
+    )
+    opts = data.enum_options_for_field("charging_state_report.charge_type")
+    check("charge_type options", opts, ["off", "ac", "dc"])
+    check("prose field -> no options", data.enum_options_for_field("bem_level"), [])
+
+    # --- translations: every curated entity + enum state covered ----------
+    print("translation completeness:")
+    trans = {
+        name: json.loads((PKG_DIR / rel).read_text(encoding="utf-8"))
+        for name, rel in (
+            ("strings.json", Path("strings.json")),
+            ("en.json", Path("translations/en.json")),
+            ("de.json", Path("translations/de.json")),
+        )
+    }
+    sensor_keys = {
+        data.entity_translation_key(s.field_name)
+        for s in data.CURATED_SENSORS_DOTTED + data.CURATED_SENSORS_FLAT
+    } | {"last_vehicle_update", "dataset_generated"}
+    binary_keys = {
+        data.entity_translation_key(b.field_name)
+        for b in data.CURATED_BINARY_DOTTED + data.CURATED_BINARY_FLAT
+    }
+    enum_state_keys = {
+        data.entity_translation_key(s.field_name): set(
+            data.enum_options_for_field(s.field_name)
+        )
+        for s in data.CURATED_SENSORS_DOTTED + data.CURATED_SENSORS_FLAT
+        if s.device_class == "enum"
+    }
+    for fname, doc in trans.items():
+        ent = doc.get("entity", {})
+        missing_s = sensor_keys - set(ent.get("sensor", {}))
+        missing_b = binary_keys - set(ent.get("binary_sensor", {}))
+        check(f"{fname} sensors complete", missing_s, set())
+        check(f"{fname} binaries complete", missing_b, set())
+        unnamed = [
+            k for k, v in ent.get("sensor", {}).items() if not v.get("name")
+        ] + [k for k, v in ent.get("binary_sensor", {}).items() if not v.get("name")]
+        check(f"{fname} all named", unnamed, [])
+        missing_states = {
+            f"{key}.{state}"
+            for key, states in enum_state_keys.items()
+            if states
+            for state in states
+            if state not in ent.get("sensor", {}).get(key, {}).get("state", {})
+        }
+        check(f"{fname} enum states complete", missing_states, set())
+
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")

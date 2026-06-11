@@ -137,6 +137,86 @@ def enum_members(description: str | None) -> list[str]:
     return members if len(members) >= 2 else []
 
 
+def shorten_enum_label(field_name: str, value):
+    """Shorten verbose VW enum labels for display only.
+
+    Removes enum prefixes that are repeated in the field name, e.g. for
+    ``charging_state_report.current_charge_state`` the value
+    ``CHARGE_STATE_CHARGING_HV_BATTERY`` becomes ``CHARGING_HV_BATTERY``.
+    Only ALLCAPS strings are touched; anything else passes through unchanged.
+    """
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Z0-9_]+", value):
+        return value
+
+    def normalize(text: str) -> str:
+        return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").upper()
+
+    candidates: list[str] = []
+
+    def add_candidate(text: str) -> None:
+        normalized = normalize(text)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    field_name = field_name or ""
+    add_candidate(field_name)
+    for part in field_name.split("."):
+        add_candidate(part)
+
+    normalized_field = normalize(field_name)
+    for removable in ("SETTINGS_", "STATUS_", "CHARGING_STATE_REPORT_"):
+        if normalized_field.startswith(removable):
+            add_candidate(normalized_field.removeprefix(removable))
+
+    for candidate in list(candidates):
+        tokens = candidate.split("_")
+        for i in range(1, len(tokens)):
+            add_candidate("_".join(tokens[i:]))
+
+    # Longest prefixes first avoids stripping only STATE_ when CHARGE_STATE_ matches.
+    for prefix in sorted(candidates, key=len, reverse=True):
+        full_prefix = f"{prefix}_"
+        if value.startswith(full_prefix) and len(value) > len(full_prefix):
+            return value[len(full_prefix):]
+
+    return value
+
+
+def entity_translation_key(field_name: str) -> str:
+    """Derive a stable HA translation key from a field name.
+
+    "battery_state_report.soc" -> "battery_state_report_soc". Used both by the
+    entity platforms and by tools/gen_translations.py, so key derivation cannot
+    drift between code and translation files.
+    """
+    return re.sub(r"[^a-z0-9]+", "_", field_name.lower()).strip("_")
+
+
+def enum_option_key(field_name: str, member: str) -> str:
+    """Lowercase state key for an enum member, as used in HA state translations.
+
+    "CHARGE_STATE_CHARGING_HV_BATTERY" -> "charging_hv_battery".
+    """
+    return str(shorten_enum_label(field_name, member)).lower()
+
+
+def enum_options_for_field(field_name: str) -> list[str]:
+    """All documented enum state keys for a field, from the data dictionary.
+
+    Several dictionary entries can share one field name; some carry the member
+    list, others only prose ("The string value of ..."), so the longest member
+    list found wins. Returns shortened, lowercased state keys in documented
+    (protobuf index) order — the order matters for integer-index fallback.
+    """
+    members: list[str] = []
+    for meta in load_dictionary().values():
+        if meta.get("name") == field_name:
+            m = enum_members(meta.get("description"))
+            if len(m) > len(members):
+                members = m
+    return [enum_option_key(field_name, m) for m in members]
+
+
 def friendly_name(field_name: str, description: str | None = None) -> str:
     """Entity name for a raw data point.
 
@@ -579,35 +659,24 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         icon="mdi:clock",
     ),
     # === Enum/Status Sensors ===
-    CuratedSensor(
-        "charging_state_report.current_charge_state",
-        "Charge state",
+    CuratedSensor("charging_state_report.current_charge_state", "Charge state", "enum",
         icon="mdi:ev-station",
     ),
-    CuratedSensor(
-        "charging_state_report.charge_mode", "Charge mode", icon="mdi:ev-station"
+    CuratedSensor("charging_state_report.charge_mode", "Charge mode", "enum", icon="mdi:ev-station"
     ),
-    CuratedSensor(
-        "charging_state_report.charge_type", "Charge type", icon="mdi:power-plug"
+    CuratedSensor("charging_state_report.charge_type", "Charge type", "enum", icon="mdi:power-plug"
     ),
-    CuratedSensor(
-        "charging_state_report.charging_scenario",
-        "Charging scenario",
+    CuratedSensor("charging_state_report.charging_scenario", "Charging scenario", "enum",
         icon="mdi:ev-station",
     ),
-    CuratedSensor(
-        "charging_state_report.immediate_action_state",
-        "Charging action state",
+    CuratedSensor("charging_state_report.immediate_action_state", "Charging action state", "enum",
         icon="mdi:ev-station",
     ),
-    CuratedSensor(
-        "settings.charge_mode_selection", "Charge mode selection", icon="mdi:cog"
+    CuratedSensor("settings.charge_mode_selection", "Charge mode selection", "enum", icon="mdi:cog"
     ),
-    CuratedSensor(
-        "settings.max_charge_current_ac", "Max AC charge current", icon="mdi:current-ac"
+    CuratedSensor("settings.max_charge_current_ac", "Max AC charge current", "enum", icon="mdi:current-ac"
     ),
-    CuratedSensor(
-        "window_heating_state", "Window heating", icon="mdi:car-defrost-rear"
+    CuratedSensor("window_heating_state", "Window heating", "enum", icon="mdi:car-defrost-rear"
     ),
     CuratedSensor("bem_level", "BEM level", None, None, None, icon="mdi:information"),
 )
@@ -1022,8 +1091,7 @@ CURATED_SENSORS_FLAT: tuple[CuratedSensor, ...] = (
         icon="mdi:clock",
     ),
     # === Enum/Status Sensors ===
-    CuratedSensor(
-        "window_heating_state", "Window heating", icon="mdi:car-defrost-rear"
+    CuratedSensor("window_heating_state", "Window heating", "enum", icon="mdi:car-defrost-rear"
     ),
     CuratedSensor("bem_level", "BEM level", None, None, None, icon="mdi:information"),
 )

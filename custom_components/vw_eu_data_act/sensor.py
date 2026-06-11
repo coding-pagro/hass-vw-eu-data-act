@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -25,58 +23,16 @@ from .data import (
     CuratedSensor,
     DataPoint,
     detect_dataset_format,
+    entity_translation_key,
+    enum_option_key,
+    enum_options_for_field,
     find_by_field,
     friendly_name,
     latest_captured_time,
     resolve_distance_unit,
+    shorten_enum_label,
 )
 from .entity import EudaEntity
-
-
-def _shorten_enum_value(dp: DataPoint, value) -> object:
-    """Shorten verbose VW enum labels for display only.
-
-    Keeps DataPoint.raw_value unchanged. Removes enum prefixes that are
-    repeated in the field name, e.g. for ``charging_state_report.current_charge_state``
-    the value ``CHARGE_STATE_CHARGING_HV_BATTERY`` becomes ``CHARGING_HV_BATTERY``.
-    """
-    if dp is None or not isinstance(value, str):
-        return value
-
-    if not re.fullmatch(r"[A-Z0-9_]+", value):
-        return value
-
-    def normalize(text: str) -> str:
-        return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").upper()
-
-    candidates: list[str] = []
-
-    def add_candidate(text: str) -> None:
-        normalized = normalize(text)
-        if normalized and normalized not in candidates:
-            candidates.append(normalized)
-
-    field_name = dp.field_name or ""
-    add_candidate(field_name)
-    for part in field_name.split("."):
-        add_candidate(part)
-
-    normalized_field = normalize(field_name)
-    for removable in ("SETTINGS_", "STATUS_", "CHARGING_STATE_REPORT_"):
-        if normalized_field.startswith(removable):
-            add_candidate(normalized_field.removeprefix(removable))
-
-    for candidate in list(candidates):
-        tokens = candidate.split("_")
-        for i in range(1, len(tokens)):
-            add_candidate("_".join(tokens[i:]))
-
-    for prefix in sorted(candidates, key=len, reverse=True):
-        full_prefix = f"{prefix}_"
-        if value.startswith(full_prefix) and len(value) > len(full_prefix):
-            return value[len(full_prefix):]
-
-    return value
 
 
 async def async_setup_entry(
@@ -108,7 +64,11 @@ async def async_setup_entry(
         # Special handling for timestamp sensors (e.g., "mileage.timestamp" or "mileage.value.timestamp")
         if ".timestamp" in curated.field_name:
             base_field = curated.field_name.replace(".timestamp", "")
-            if base_field in present_fields:
+            base_dp = find_by_field(points, base_field)
+            # Only when the data point really carries a timestampUtc attribute;
+            # many vehicles' datasets don't, which left a forever-unknown
+            # "Last connected" sensor (Last vehicle update covers those).
+            if base_dp is not None and base_dp.timestamp is not None:
                 entities.append(EudaCuratedSensor(coordinator, curated))
         elif curated.field_name in present_fields:
             entities.append(EudaCuratedSensor(coordinator, curated))
@@ -134,15 +94,44 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
         super().__init__(coordinator)
         self._curated = curated
         self._attr_unique_id = f"{coordinator.vin}_{curated.field_name}"
-        self._attr_name = curated.name
+        # Name and (for enums) states come from the translation files; see
+        # tools/gen_translations.py. curated.name is the English source string.
+        self._attr_translation_key = entity_translation_key(curated.field_name)
         if curated.icon:
             self._attr_icon = curated.icon
-        if curated.device_class:
+        self._enum_options: list[str] | None = None
+        if curated.device_class == "enum":
+            # ENUM requires the option list; fall back to a plain text sensor
+            # when the dictionary documents no members for this field.
+            options = enum_options_for_field(curated.field_name)
+            if options:
+                self._enum_options = options
+                self._attr_device_class = SensorDeviceClass.ENUM
+                self._attr_options = options
+        elif curated.device_class:
             self._attr_device_class = SensorDeviceClass(curated.device_class)
         if curated.state_class:
             self._attr_state_class = SensorStateClass(curated.state_class)
         if curated.suggested_display_precision is not None:
             self._attr_suggested_display_precision = curated.suggested_display_precision
+
+    def _enum_state(self, raw_value) -> str | None:
+        """Map a raw enum value onto the sensor's lowercase option keys."""
+        if raw_value is None:
+            return None
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool):
+            # protobuf index the bound data point couldn't resolve itself
+            if 0 <= raw_value < len(self._enum_options):
+                return self._enum_options[raw_value]
+            return None
+        state = enum_option_key(self._curated.field_name, str(raw_value))
+        if state not in self._enum_options:
+            # Live values occasionally differ from the documented members
+            # (e.g. MAX_CHARGE_CURRENT_AC_MAXIMUM vs the documented
+            # MAX_CHARGE_CURRENT_MAXIMUM); extend the options instead of
+            # letting HA reject the state.
+            self._enum_options.append(state)
+        return state
 
     @property
     def native_value(self):
@@ -181,7 +170,9 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
                 transformed = fuel_consumption_l_per_1000km_to_l_per_100km(raw_value)
                 return self._sticky(transformed)
 
-        return self._sticky(_shorten_enum_value(dp, raw_value))
+        if self._enum_options is not None:
+            return self._sticky(self._enum_state(raw_value))
+        return self._sticky(shorten_enum_label(self._curated.field_name, raw_value))
 
     @property
     def native_unit_of_measurement(self) -> str | None:
@@ -210,11 +201,11 @@ class EudaLastVehicleUpdateSensor(EudaEntity, SensorEntity):
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:car-clock"
+    _attr_translation_key = "last_vehicle_update"
 
     def __init__(self, coordinator: EudaCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.vin}_last_vehicle_update"
-        self._attr_name = "Last vehicle update"
 
     @property
     def native_value(self):
@@ -227,11 +218,11 @@ class EudaDatasetGeneratedSensor(EudaEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:database-clock"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "dataset_generated"
 
     def __init__(self, coordinator: EudaCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.vin}_dataset_generated"
-        self._attr_name = "Dataset generated"
 
     @property
     def native_value(self):
@@ -259,7 +250,9 @@ class EudaRawSensor(EudaEntity, SensorEntity):
     @property
     def native_value(self):
         dp = (self.coordinator.data or {}).get(self._key)
-        return self._sticky(_shorten_enum_value(dp, dp.value) if dp else None)
+        return self._sticky(
+            shorten_enum_label(dp.field_name, dp.value) if dp else None
+        )
 
     @property
     def extra_state_attributes(self) -> dict:

@@ -18,6 +18,7 @@ from .data import (
     DataPoint,
     decode_binary_state,
     detect_dataset_format,
+    entity_translation_key,
     find_by_field,
 )
 from .entity import EudaEntity
@@ -52,7 +53,9 @@ class EudaBinarySensor(EudaEntity, BinarySensorEntity):
         super().__init__(coordinator)
         self._curated = curated
         self._attr_unique_id = f"{coordinator.vin}_{curated.field_name}"
-        self._attr_name = curated.name
+        # Name comes from the translation files (tools/gen_translations.py);
+        # curated.name is the English source string.
+        self._attr_translation_key = entity_translation_key(curated.field_name)
         if curated.icon:
             self._attr_icon = curated.icon
         if curated.device_class:
