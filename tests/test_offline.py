@@ -248,6 +248,115 @@ def main() -> int:
     dp_prose = data.DataPoint("k", "report_type", "3", "enum", None, "The enum value of report type")
     check("prose enum desc -> int kept", dp_prose.value, 3)
 
+    # --- timestamps: parsing + dataset freshness --------------------------
+    print("timestamps:")
+    from datetime import datetime, timezone
+
+    pt = data._parse_timestamp
+    check("iso Z", pt("2026-06-11T04:47:48Z"), datetime(2026, 6, 11, 4, 47, 48, tzinfo=timezone.utc))
+    check(
+        "iso offset kept",
+        pt("2026-06-11T06:47:46.000+02:00").astimezone(timezone.utc),
+        datetime(2026, 6, 11, 4, 47, 46, tzinfo=timezone.utc),
+    )
+    # offset-less ISO is documented as UTC -> must come back tz-aware
+    check("naive iso -> aware utc", pt("2026-06-11T04:47:48"), datetime(2026, 6, 11, 4, 47, 48, tzinfo=timezone.utc))
+    check("epoch millis", pt("1781153273564"), datetime(2026, 6, 11, 4, 47, 53, 564000, tzinfo=timezone.utc))
+    check("epoch seconds", pt("1781153273"), datetime(2026, 6, 11, 4, 47, 53, tzinfo=timezone.utc))
+    check("garbage -> None", pt("VALID"), None)
+    check("short int -> None", pt("70790"), None)
+
+    # latest_captured_time: max across flat, dotted and epoch variants, and
+    # mixed offsets must compare without raising (all values are tz-aware).
+    ds_ts = data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+        {"key": "t1", "dataFieldName": "car_captured_time", "value": "2026-06-11T04:47:48Z"},
+        {"key": "t2", "dataFieldName": "profile_state_report.car_captured_time", "value": "2026-06-11T06:50:00.000+02:00"},
+        {"key": "t3", "dataFieldName": "car_captured_utc_timestamp", "value": "1781153273"},
+        {"key": "t4", "dataFieldName": "timestamp", "value": "2026-06-11T23:59:59Z"},
+        {"key": "t5", "dataFieldName": "mileage.value", "value": "70790"},
+    ]})
+    # t2 (04:50 UTC) is newest among captured-time fields; the unrelated
+    # "timestamp" field (t4) must not be picked up.
+    check(
+        "captured_at = max of captured fields only",
+        ds_ts.captured_at,
+        datetime(2026, 6, 11, 4, 50, tzinfo=timezone.utc),
+    )
+    check("no captured fields -> None", data.latest_captured_time({}), None)
+
+    # --- enum label shortening + option keys ------------------------------
+    print("enum shortening:")
+    sh = data.shorten_enum_label
+    check(
+        "charge_state prefix stripped",
+        sh("charging_state_report.current_charge_state", "CHARGE_STATE_CHARGING_HV_BATTERY"),
+        "CHARGING_HV_BATTERY",
+    )
+    check(
+        "settings prefix stripped",
+        sh("settings.charge_mode_selection", "CHARGE_MODE_SELECTION_IMMEDIATECHARGING"),
+        "IMMEDIATECHARGING",
+    )
+    check("mixed case untouched", sh("f", "Normal text"), "Normal text")
+    check("number untouched", sh("f", 42), 42)
+    check(
+        "live AC variant shortens fully",
+        data.enum_option_key("settings.max_charge_current_ac", "MAX_CHARGE_CURRENT_AC_MAXIMUM"),
+        "maximum",
+    )
+    check(
+        "translation key dotted",
+        data.entity_translation_key("battery_state_report.soc"),
+        "battery_state_report_soc",
+    )
+    opts = data.enum_options_for_field("charging_state_report.charge_type")
+    check("charge_type options", opts, ["off", "ac", "dc"])
+    check("prose field -> no options", data.enum_options_for_field("bem_level"), [])
+
+    # --- translations: every curated entity + enum state covered ----------
+    print("translation completeness:")
+    trans = {
+        name: json.loads((PKG_DIR / rel).read_text(encoding="utf-8"))
+        for name, rel in (
+            ("strings.json", Path("strings.json")),
+            ("en.json", Path("translations/en.json")),
+            ("de.json", Path("translations/de.json")),
+        )
+    }
+    sensor_keys = {
+        data.entity_translation_key(s.field_name)
+        for s in data.CURATED_SENSORS_DOTTED + data.CURATED_SENSORS_FLAT
+    } | {"last_vehicle_update", "dataset_generated"}
+    binary_keys = {
+        data.entity_translation_key(b.field_name)
+        for b in data.CURATED_BINARY_DOTTED + data.CURATED_BINARY_FLAT
+    }
+    enum_state_keys = {
+        data.entity_translation_key(s.field_name): set(
+            data.enum_options_for_field(s.field_name)
+        )
+        for s in data.CURATED_SENSORS_DOTTED + data.CURATED_SENSORS_FLAT
+        if s.device_class == "enum"
+    }
+    for fname, doc in trans.items():
+        ent = doc.get("entity", {})
+        missing_s = sensor_keys - set(ent.get("sensor", {}))
+        missing_b = binary_keys - set(ent.get("binary_sensor", {}))
+        check(f"{fname} sensors complete", missing_s, set())
+        check(f"{fname} binaries complete", missing_b, set())
+        unnamed = [
+            k for k, v in ent.get("sensor", {}).items() if not v.get("name")
+        ] + [k for k, v in ent.get("binary_sensor", {}).items() if not v.get("name")]
+        check(f"{fname} all named", unnamed, [])
+        missing_states = {
+            f"{key}.{state}"
+            for key, states in enum_state_keys.items()
+            if states
+            for state in states
+            if state not in ent.get("sensor", {}).get(key, {}).get("state", {})
+        }
+        check(f"{fname} enum states complete", missing_states, set())
+
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")
