@@ -272,10 +272,11 @@ class EudaApiClient:
             landing = str(resp.url)
             landing_html = await resp.text()
             if resp.status >= 400:
-                _LOGGER.debug(
-                    "login step4: HTTP %s body[:500]=%s", resp.status, landing_html[:500]
-                )
+                # Don't log the response body: the identity error page can
+                # echo personal data (e.g. the email), and debug logs end up
+                # in support tickets. _login_error extracts what matters.
                 err = _login_error(landing_html)
+                _LOGGER.debug("login step4: HTTP %s error=%s", resp.status, err or "unknown")
                 raise AuthError(err or f"Login rejected (HTTP {resp.status})")
         _LOGGER.debug("login step4: landed on %s", landing)
 

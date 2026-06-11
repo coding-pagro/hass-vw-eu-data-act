@@ -197,7 +197,9 @@ class EudaConfigFlow(ConfigFlow, domain=DOMAIN):
             meta = await client.async_get_metadata(vin)
         finally:
             await session.close()
-        identifier = meta.get("Identifier")
+        # The portal's key casing varies; accept both like
+        # coordinator._refresh_identifier does.
+        identifier = meta.get("Identifier") or meta.get("identifier")
         if not identifier:
             raise ApiError("No data-request identifier for this vehicle")
         return identifier, meta.get("Name")
