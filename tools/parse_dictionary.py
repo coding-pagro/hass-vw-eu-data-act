@@ -74,7 +74,9 @@ def parse(pdf_path: Path) -> dict[str, dict[str, str]]:
         for page in pdf.pages:
             for table in page.extract_tables():
                 for row in table:
-                    if not row or len(row) < 6:
+                    # Continuous dictionaries have 6 columns; the Historical
+                    # Data dictionary omits the trailing "Data Cluster" column.
+                    if not row or len(row) < 5:
                         continue
                     key = _clean_key(row[0])
                     if key.lower() == HEADER_FIRST_CELL:
@@ -86,7 +88,7 @@ def parse(pdf_path: Path) -> dict[str, dict[str, str]]:
                         "description": _clean_text(row[2]),
                         "unit": _clean_token(row[3]),
                         "type": _clean_token(row[4]).lower(),
-                        "cluster": _clean_text(row[5]),
+                        "cluster": _clean_text(row[5]) if len(row) > 5 else "",
                     }
                     if key in out and out[key] != entry:
                         dupes += 1
@@ -107,7 +109,12 @@ def main() -> None:
     print(f"Parsing {pdf_path.name} ...")
     mapping = parse(pdf_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(mapping, indent=1, ensure_ascii=False, sort_keys=True))
+    # encoding matters: Windows' default is cp1252, which cannot represent
+    # every character in the PDF and crashes the write.
+    out_path.write_text(
+        json.dumps(mapping, indent=1, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
     print(f"Wrote {len(mapping)} data points -> {out_path}")
 
     # sanity check from the plan
