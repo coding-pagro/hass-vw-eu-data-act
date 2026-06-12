@@ -105,8 +105,14 @@ CONF_IDENTIFIER = "identifier"
 CONF_NICKNAME = "nickname"
 
 # --- Scheduling -----------------------------------------------------------
-# Datasets land ~every 15 min; refresh shortly after the next expected drop.
+# The portal lets the user choose the delivery frequency of the continuous
+# data request, so the real cadence is inferred from the spacing of the listed
+# datasets' createdOn timestamps. DATASET_INTERVAL is only the fallback when
+# the listing is too short to infer from (the portal default is ~15 min);
+# MIN/MAX bound the inferred value against outliers and clock weirdness.
 DATASET_INTERVAL = timedelta(minutes=15)
+MIN_DATASET_INTERVAL = timedelta(minutes=5)
+MAX_DATASET_INTERVAL = timedelta(hours=24)
 POST_DATASET_BUFFER = timedelta(seconds=45)
 RETRY_INTERVAL = timedelta(minutes=1)
 MIN_INTERVAL = timedelta(seconds=30)

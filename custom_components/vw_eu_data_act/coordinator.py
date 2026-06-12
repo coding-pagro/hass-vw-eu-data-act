@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -18,6 +18,8 @@ from .const import (
     CONF_VIN,
     DATASET_INTERVAL,
     DOMAIN,
+    MAX_DATASET_INTERVAL,
+    MIN_DATASET_INTERVAL,
     MIN_INTERVAL,
     NO_CONTENT_SUFFIX,
     POST_DATASET_BUFFER,
@@ -50,6 +52,27 @@ def _filename_timestamp(name: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def _infer_dataset_interval(timestamps: list[datetime]) -> timedelta:
+    """Infer the dataset cadence from the listed drops' createdOn spacing.
+
+    The portal lets the user choose the delivery frequency of their continuous
+    data request, so a hardcoded interval is wrong for anyone not on the
+    default: with e.g. an hourly cadence the next dataset would look "overdue"
+    right after every drop, degrading to 1-minute retry polling for ~45 min of
+    every hour. The median gap between consecutive drops is robust against a
+    single outlier (portal hiccup, duplicated timestamp) and is clamped to
+    [MIN_DATASET_INTERVAL, MAX_DATASET_INTERVAL].
+    """
+    if len(timestamps) < 3:
+        return DATASET_INTERVAL  # too few drops to infer; assume the default
+    ts = sorted(timestamps)
+    deltas = sorted(b - a for a, b in zip(ts, ts[1:]) if b > a)
+    if not deltas:
+        return DATASET_INTERVAL
+    median = deltas[len(deltas) // 2]
+    return min(max(median, MIN_DATASET_INTERVAL), MAX_DATASET_INTERVAL)
 
 
 def _created_on(entry: dict) -> datetime | None:
@@ -322,19 +345,27 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
         return True
 
     def _reschedule(self, listing: list[dict]) -> None:
-        """Schedule the next poll for ~15 min after the newest known dataset.
+        """Schedule the next poll shortly after the next expected dataset drop.
 
-        If that time has already passed (a new dataset is due but not yet
-        present), poll every minute until it appears.
+        The drop cadence is inferred from the listing (the portal lets users
+        pick the delivery frequency). If the expected time has already passed
+        (a new dataset is due but not yet present), poll every minute until it
+        appears.
         """
         timestamps = [ts for e in listing if (ts := _created_on(e))]
         newest = max(timestamps) if timestamps else None
         if newest:
-            target = newest + DATASET_INTERVAL + POST_DATASET_BUFFER
+            interval = _infer_dataset_interval(timestamps)
+            target = newest + interval + POST_DATASET_BUFFER
             delta = target - dt_util.utcnow()
             if delta > MIN_INTERVAL:
                 self.update_interval = delta
-                _LOGGER.debug("Next refresh in %s (after newest %s)", delta, newest)
+                _LOGGER.debug(
+                    "Next refresh in %s (cadence %s, newest %s)",
+                    delta,
+                    interval,
+                    newest,
+                )
                 return
         # newest dataset is overdue (or unknown) -> short retry for the next drop
         self.update_interval = RETRY_INTERVAL
