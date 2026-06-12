@@ -134,6 +134,47 @@ def main() -> int:
     # newest timestamp (11:00, key "aaa", value 50100) wins over smallest key
     check("with-timestamp: newest wins", ts_picks, {50100})
 
+    # --- merge_points: stale fallback dataset must not overwrite newer ----
+    print("merge_points:")
+    DP = data.DataPoint
+
+    def _dp(value, ts=None):
+        return DP("k1", "mileage.value", value, "int", timestamp_utc=ts)
+
+    # incoming newer -> replaces
+    m = data.merge_points(
+        {"k1": _dp("50000", "2026-01-01T10:00:00Z")},
+        {"k1": _dp("50100", "2026-01-01T11:00:00Z")},
+    )
+    check("newer incoming wins", m["k1"].raw_value, "50100")
+    # incoming strictly older (fallback download) -> existing kept
+    m = data.merge_points(
+        {"k1": _dp("50100", "2026-01-01T11:00:00Z")},
+        {"k1": _dp("50000", "2026-01-01T10:00:00Z")},
+    )
+    check("stale incoming skipped", m["k1"].raw_value, "50100")
+    # equal timestamps -> incoming wins (refresh of the same snapshot)
+    m = data.merge_points(
+        {"k1": _dp("50000", "2026-01-01T10:00:00Z")},
+        {"k1": _dp("50001", "2026-01-01T10:00:00Z")},
+    )
+    check("equal ts: incoming wins", m["k1"].raw_value, "50001")
+    # either side without timestamp -> incoming wins (fields without
+    # timestamps must keep updating every cycle)
+    m = data.merge_points({"k1": _dp("1")}, {"k1": _dp("2")})
+    check("no ts: incoming wins", m["k1"].raw_value, "2")
+    m = data.merge_points(
+        {"k1": _dp("1", "2026-01-01T10:00:00Z")}, {"k1": _dp("2")}
+    )
+    check("incoming without ts wins", m["k1"].raw_value, "2")
+    # new keys are added, untouched keys survive
+    m = data.merge_points(
+        {"k1": _dp("1", "2026-01-01T11:00:00Z")},
+        {"k2": DP("k2", "range.value", "300", "int")},
+    )
+    check("new key added", m["k2"].raw_value, "300")
+    check("untouched key survives", m["k1"].raw_value, "1")
+
     # --- curated / raw classification ------------------------------------
     print("curated registry:")
     check("soc is curated", "battery_state_report.soc" in data.CURATED_FIELDS, True)
