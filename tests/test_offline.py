@@ -103,8 +103,9 @@ def main() -> int:
     check("remaining_climate_time", _field_val(ds, "remaining_climate_time"), 0.0)
     check("captured_at present", ds.captured_at is not None, True)
 
-    # --- duplicate field: deterministic selection regardless of order -----
+    # --- duplicate field: timestamp-aware selection ----------------------
     print("duplicate field selection:")
+    # No timestamps: fall back to smallest key for stability
     dup_entries = [
         {"key": "ccc", "dataFieldName": "charging_state_report.current_charge_state", "value": "C"},
         {"key": "aaa", "dataFieldName": "charging_state_report.current_charge_state", "value": "A"},
@@ -116,8 +117,22 @@ def main() -> int:
             {"vin": "V", "user_id": "u", "Data": [dup_entries[i] for i in order]}
         )
         picks.add(_field_val(ds_d, "charging_state_report.current_charge_state"))
-    # always the smallest-key entry ("aaa" -> "A"), independent of array order
-    check("stable pick under shuffle", picks, {"A"})
+    # no timestamps -> stable fallback: smallest-key entry ("aaa" -> "A")
+    check("no-timestamp: stable pick under shuffle", picks, {"A"})
+    # With timestamps: newest wins regardless of key order
+    dup_ts_entries = [
+        {"key": "zzz", "dataFieldName": "mileage.value", "value": "50000", "timestampUtc": "2026-01-01T10:00:00Z"},
+        {"key": "aaa", "dataFieldName": "mileage.value", "value": "50100", "timestampUtc": "2026-01-01T11:00:00Z"},
+        {"key": "mmm", "dataFieldName": "mileage.value", "value": "49900", "timestampUtc": "2026-01-01T09:00:00Z"},
+    ]
+    ts_picks = set()
+    for order in ([0, 1, 2], [2, 1, 0], [1, 2, 0]):
+        ds_ts2 = data.Dataset.from_json(
+            {"vin": "V", "user_id": "u", "Data": [dup_ts_entries[i] for i in order]}
+        )
+        ts_picks.add(_field_val(ds_ts2, "mileage.value"))
+    # newest timestamp (11:00, key "aaa", value 50100) wins over smallest key
+    check("with-timestamp: newest wins", ts_picks, {50100})
 
     # --- curated / raw classification ------------------------------------
     print("curated registry:")

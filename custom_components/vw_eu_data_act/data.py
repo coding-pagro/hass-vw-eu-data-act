@@ -310,16 +310,25 @@ def find_by_field(
 ) -> "DataPoint | None":
     """Pick a single data point for a (possibly duplicated) field name.
 
-    The portal merges several report snapshots into one flat array with no
-    ordering guarantee and no way to tell which value is "live", so a field
-    like ``charging_state_report.current_charge_state`` can appear several
-    times under different UUIDs with conflicting values. We pick the entry with
-    the smallest ``key`` (UUID): an arbitrary but *stable* choice, so a curated
-    sensor consistently tracks the same data point across refreshes instead of
-    flip-flopping when the portal reshuffles the array.
+    The portal merges several report snapshots into one flat array. The same
+    field can appear multiple times under different UUIDs with different
+    ``timestampUtc`` values. We prefer the entry with the **newest**
+    ``timestampUtc`` so we always surface the most recent reading rather than
+    an older snapshot that would look like a backward jump in mileage or SoC.
+    The smallest key is used only as a stable tiebreaker when timestamps are
+    equal or absent.
     """
     matches = [dp for dp in points.values() if dp.field_name == field_name]
-    return min(matches, key=lambda dp: dp.key) if matches else None
+    if not matches:
+        return None
+
+    def _key(dp: "DataPoint"):
+        ts = dp.timestamp  # tz-aware datetime or None
+        if ts is None:
+            return (1, 0.0, dp.key)  # no timestamp: prefer entries that have one
+        return (0, -ts.timestamp(), dp.key)  # newest first; smallest key as tiebreaker
+
+    return min(matches, key=_key)
 
 
 def _parse_timestamp(raw: str) -> datetime | None:
