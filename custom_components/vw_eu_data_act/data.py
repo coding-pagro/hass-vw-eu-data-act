@@ -493,6 +493,34 @@ def fuel_consumption_l_per_1000km_to_l_per_100km(value) -> float | None:
         return None
 
 
+def is_remaining_time_sentinel(value) -> bool:
+    """True when a remaining-time value is the uint16 "no estimate" sentinel.
+
+    The vehicle reports 65535 (0xFFFF) for remaining charging time when no
+    estimate exists (not charging, not plugged in). That is "unknown", not a
+    duration of ~45 days, so the sensor must show no value instead.
+    """
+    try:
+        return float(value) == 65535
+    except (ValueError, TypeError):
+        return False
+
+
+def find_curated(
+    points: dict[str, "DataPoint"], curated: "CuratedSensor"
+) -> "DataPoint | None":
+    """Resolve a curated sensor to a data point, trying aliases in order.
+
+    The primary field always wins when present; aliases only fill in for
+    model generations that deliver the value under a different name.
+    """
+    for name in (curated.field_name, *curated.aliases):
+        dp = find_by_field(points, name)
+        if dp is not None:
+            return dp
+    return None
+
+
 # Named unit resolvers selectable per curated sensor via ``unit_resolver``.
 UNIT_RESOLVERS = {
     "distance": resolve_distance_unit,
@@ -509,8 +537,9 @@ class CuratedSensor:
     state_class: str | None = None
     icon: str | None = None
     # Named value transform applied in sensor.py: "decikelvin_to_celsius",
-    # "abs" or "fuel_consumption"; None keeps parse_value's typing. Durations
-    # like "1800s" need no transform - parse_value already yields seconds.
+    # "abs", "fuel_consumption" or "remaining_time" (filters the 65535
+    # sentinel); None keeps parse_value's typing. Durations like "1800s" need
+    # no transform - parse_value already yields seconds.
     transform: str | None = None
     # companion field holding the unit enum (e.g. "mileage.unit"); when set, the
     # sensor's unit is resolved from it at runtime, falling back to ``unit``.
@@ -519,6 +548,11 @@ class CuratedSensor:
     unit_resolver: str = "distance"
     # number of decimal places to show (None = auto)
     suggested_display_precision: int | None = None
+    # fallback field names tried in order when ``field_name`` is absent; which
+    # field carries a value (e.g. SoC) varies by model generation, so one
+    # curated sensor can bind to the first of several candidates (the entity's
+    # unique_id and translation key always derive from ``field_name``).
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -628,6 +662,7 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         "s",
         "measurement",
         icon="mdi:battery-clock",
+        transform="remaining_time",
     ),
     CuratedSensor(
         "battery_state_report.remaining_charging_time_bulk",
@@ -636,6 +671,7 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         "s",
         "measurement",
         icon="mdi:battery-clock",
+        transform="remaining_time",
     ),
     # === Distance & Range ===
     CuratedSensor(
@@ -734,6 +770,37 @@ CURATED_BINARY_DOTTED: tuple[CuratedBinary, ...] = (
 # ---------------------------------------------------------------------------
 
 CURATED_SENSORS_FLAT: tuple[CuratedSensor, ...] = (
+    # === Charging & Battery ===
+    # Which field carries the SoC varies by model generation (cf. evcc's
+    # eudataact lookup chain); the aliases cover hv_soc and battery_level_HV.
+    CuratedSensor(
+        "state_of_charge",
+        "Battery",
+        "battery",
+        "%",
+        "measurement",
+        aliases=("hv_soc", "battery_level_HV.value"),
+    ),
+    CuratedSensor(
+        "remaining_charging_time",
+        "Remaining charging time",
+        "duration",
+        "min",
+        "measurement",
+        icon="mdi:battery-clock",
+        transform="remaining_time",
+    ),
+    CuratedSensor("charging_state", "Charge state", None, None, None, icon="mdi:ev-station"),
+    CuratedSensor("plug_state", "Plug state", None, None, None, icon="mdi:power-plug"),
+    CuratedSensor(
+        "plug_connection_state",
+        "Plug connection",
+        None,
+        None,
+        None,
+        icon="mdi:power-plug",
+    ),
+    CuratedSensor("plug_lock_state", "Plug lock", None, None, None, icon="mdi:lock"),
     # === Distance & Range ===
     CuratedSensor(
         "mileage",
@@ -1126,6 +1193,22 @@ CURATED_SENSORS_FLAT: tuple[CuratedSensor, ...] = (
     # === Enum/Status Sensors ===
     CuratedSensor("window_heating_state", "Window heating", "enum", icon="mdi:car-defrost-rear"
     ),
+    CuratedSensor(
+        "window_heating_state_front",
+        "Window heating front",
+        None,
+        None,
+        None,
+        icon="mdi:car-defrost-front",
+    ),
+    CuratedSensor(
+        "window_heating_state_rear",
+        "Window heating rear",
+        None,
+        None,
+        None,
+        icon="mdi:car-defrost-rear",
+    ),
     CuratedSensor("bem_level", "BEM level", None, None, None, icon="mdi:information"),
 )
 
@@ -1288,6 +1371,7 @@ CURATED_BINARY_FLAT: tuple[CuratedBinary, ...] = (
 CURATED_FIELDS: frozenset[str] = frozenset(
     [s.field_name for s in CURATED_SENSORS_DOTTED]
     + [s.field_name for s in CURATED_SENSORS_FLAT]
+    + [a for s in CURATED_SENSORS_DOTTED + CURATED_SENSORS_FLAT for a in s.aliases]
     + [b.field_name for b in CURATED_BINARY_DOTTED]
     + [b.field_name for b in CURATED_BINARY_FLAT]
 )
