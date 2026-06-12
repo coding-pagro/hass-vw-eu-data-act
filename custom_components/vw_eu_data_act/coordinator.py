@@ -18,6 +18,7 @@ from .const import (
     CONF_VIN,
     DATASET_INTERVAL,
     DOMAIN,
+    MAX_BACKFILL,
     MAX_DATASET_INTERVAL,
     MIN_DATASET_INTERVAL,
     MIN_INTERVAL,
@@ -136,9 +137,35 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
             )
             raise UpdateFailed("No datasets available on first load")
 
-        # Try to load datasets, starting with newest and falling back to older ones
-        last_error = None
-        for dataset_entry in reversed(content):
+        # High-water mark: only download datasets newer than the newest one
+        # already merged (dataset_created_at doubles as the mark; it lives in
+        # memory only, so the first refresh after a restart seeds from the
+        # newest MAX_BACKFILL datasets for fuller entity coverage at setup).
+        if self.dataset_created_at is not None and self.data:
+            pending = [
+                e
+                for e in content
+                if (ts := _created_on(e)) and ts > self.dataset_created_at
+            ]
+        else:
+            pending = content[-MAX_BACKFILL:]
+
+        if not pending:
+            # Nothing new since the last merge: skip the downloads entirely
+            # instead of re-fetching a dataset we already processed.
+            _LOGGER.debug("No datasets newer than %s", self.dataset_created_at)
+            self._reschedule(listing)
+            return self.data
+
+        # Download all pending datasets oldest -> newest, merging each one;
+        # the timestamp-aware merge guarantees a point never overwrites a
+        # strictly newer one. A dataset that keeps failing is skipped (it is
+        # retried until a newer dataset succeeds and moves the mark past it).
+        merged: dict[str, DataPoint] = dict(self.data) if self.data else {}
+        last_error: ApiError | None = None
+        success = False
+
+        for dataset_entry in pending:
             # Use fewer, faster retries during initial setup for better UX
             # Full retries kick in after first successful load
             max_retries = 3 if self._is_initial_setup else 5
@@ -149,25 +176,11 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                     payload = await self.client.async_download_dataset(
                         self.vin, self.identifier, dataset_entry["name"]
                     )
-                    self.latest_dataset = Dataset.from_json(payload)
-                    # max(): a fallback download of an *older* dataset must not
-                    # regress the "Dataset generated" timestamp sensor.
-                    created = _created_on(dataset_entry)
-                    if created and (
-                        self.dataset_created_at is None
-                        or created > self.dataset_created_at
-                    ):
-                        self.dataset_created_at = created
-                    self._is_initial_setup = False
-                    last_error = None
-                    break  # Success!
                 except AuthError as err:
                     raise ConfigEntryAuthFailed(str(err)) from err
                 except ApiError as err:
                     last_error = err
-                    is_server_error = _is_server_error(err)
-
-                    if is_server_error and attempt < max_retries - 1:
+                    if _is_server_error(err) and attempt < max_retries - 1:
                         _LOGGER.debug(
                             "Server error downloading %s (attempt %d/%d): %s, retrying in %ds",
                             dataset_entry["name"],
@@ -178,57 +191,52 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                         )
                         await asyncio.sleep(retry_delay)
                         continue
-                    elif is_server_error:
-                        _LOGGER.debug(
-                            "Server error downloading %s after %d attempts: %s, trying previous dataset",
-                            dataset_entry["name"],
-                            max_retries,
-                            err,
-                        )
-                        break
-                    else:
-                        _LOGGER.debug(
-                            "Error downloading %s: %s", dataset_entry["name"], err
-                        )
-                        break
+                    _LOGGER.debug(
+                        "Giving up on %s: %s", dataset_entry["name"], err
+                    )
+                    break
+                else:
+                    self.latest_dataset = Dataset.from_json(payload)
+                    merged = merge_points(merged, self.latest_dataset.points)
+                    # max() keeps the mark monotonic even if the portal lists
+                    # entries out of order.
+                    created = _created_on(dataset_entry)
+                    if created and (
+                        self.dataset_created_at is None
+                        or created > self.dataset_created_at
+                    ):
+                        self.dataset_created_at = created
+                    self._is_initial_setup = False
+                    success = True
+                    break
 
-            if last_error is None:
-                break
+        if success and last_error is None:
+            self._reschedule(listing)
+            return merged
 
-            if last_error and not _is_server_error(last_error):
-                break
-
-        # If all downloads failed
-        if last_error:
+        if success:
+            # Partial catch-up: some datasets merged, the rest still pending.
+            # Retry soon rather than waiting a full cadence for the missing one.
             self.update_interval = RETRY_INTERVAL
-            if self.data:
-                # Subsequent refresh: keep previous data on failure
-                _LOGGER.debug(
-                    "Could not download any dataset (last error: %s), keeping previous data",
-                    last_error,
-                )
-                self._reschedule(listing)
-                return self.data
-            # First load failure: raise so HA retries setup
-            _LOGGER.error(
-                "Could not download any dataset on first load: %s. Will retry in %s.",
-                last_error,
-                RETRY_INTERVAL,
-            )
-            raise UpdateFailed(
-                f"Failed to download dataset on first load: {last_error}"
-            ) from last_error
+            return merged
 
-        self._reschedule(listing)
-
-        # Merge new data with existing to preserve missing fields. The download
-        # loop may have fallen back to an *older* dataset, so the merge is
-        # timestamp-aware: a point never overwrites a strictly newer one.
+        # Nothing downloaded at all
+        self.update_interval = RETRY_INTERVAL
         if self.data:
-            return merge_points(self.data, self.latest_dataset.points)
-
-        # First successful load
-        return self.latest_dataset.points
+            _LOGGER.debug(
+                "Could not download any dataset (last error: %s), keeping previous data",
+                last_error,
+            )
+            return self.data
+        # First load failure: raise so HA retries setup
+        _LOGGER.error(
+            "Could not download any dataset on first load: %s. Will retry in %s.",
+            last_error,
+            RETRY_INTERVAL,
+        )
+        raise UpdateFailed(
+            f"Failed to download dataset on first load: {last_error}"
+        ) from last_error
 
     async def _async_list_with_refresh(self) -> list[dict]:
         """List datasets, self-healing a stale identifier once if needed.

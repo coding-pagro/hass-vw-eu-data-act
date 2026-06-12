@@ -119,3 +119,8 @@ MIN_INTERVAL = timedelta(seconds=30)
 
 # Files with this suffix carry no payload and are skipped.
 NO_CONTENT_SUFFIX = "_no_content_found.zip"
+
+# On the first refresh (no high-water mark yet, e.g. after a HA restart) seed
+# the merged state from this many of the newest datasets instead of just one,
+# so fields that don't appear in every dataset still get entities at setup.
+MAX_BACKFILL = 8
