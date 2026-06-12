@@ -68,6 +68,9 @@
       "bem_level": {
         "name": "BEM level"
       },
+      "charging_state": {
+        "name": "Charge state"
+      },
       "charging_state_report_charge_mode": {
         "name": "Charge mode",
         "state": {
@@ -207,6 +210,15 @@
       "outside_temperature": {
         "name": "Outside temperature"
       },
+      "plug_connection_state": {
+        "name": "Plug connection"
+      },
+      "plug_lock_state": {
+        "name": "Plug lock"
+      },
+      "plug_state": {
+        "name": "Plug state"
+      },
       "position_front_left_door_window_lifter": {
         "name": "Front left window position"
       },
@@ -227,6 +239,9 @@
       },
       "range_value": {
         "name": "Electric range"
+      },
+      "remaining_charging_time": {
+        "name": "Remaining charging time"
       },
       "remaining_climate_time": {
         "name": "Remaining climate time"
@@ -276,6 +291,9 @@
       "short_term_data_travel_time": {
         "name": "Travel time (short)"
       },
+      "state_of_charge": {
+        "name": "Battery"
+      },
       "tyre_pressure_actual_front_left": {
         "name": "Tire pressure FL"
       },
@@ -312,6 +330,12 @@
           "off": "Off",
           "on": "On"
         }
+      },
+      "window_heating_state_front": {
+        "name": "Window heating front"
+      },
+      "window_heating_state_rear": {
+        "name": "Window heating rear"
       }
     },
     "binary_sensor": {

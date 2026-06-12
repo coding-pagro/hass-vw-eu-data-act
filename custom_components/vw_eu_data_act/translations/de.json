@@ -68,6 +68,9 @@
       "bem_level": {
         "name": "BEM-Level"
       },
+      "charging_state": {
+        "name": "Ladestatus"
+      },
       "charging_state_report_charge_mode": {
         "name": "Lademodus",
         "state": {
@@ -207,6 +210,15 @@
       "outside_temperature": {
         "name": "Außentemperatur"
       },
+      "plug_connection_state": {
+        "name": "Steckerverbindung"
+      },
+      "plug_lock_state": {
+        "name": "Steckerverriegelung"
+      },
+      "plug_state": {
+        "name": "Steckerstatus"
+      },
       "position_front_left_door_window_lifter": {
         "name": "Fensterposition vorne links"
       },
@@ -227,6 +239,9 @@
       },
       "range_value": {
         "name": "Elektrische Reichweite"
+      },
+      "remaining_charging_time": {
+        "name": "Restladezeit"
       },
       "remaining_climate_time": {
         "name": "Restzeit Klimatisierung"
@@ -276,6 +291,9 @@
       "short_term_data_travel_time": {
         "name": "Fahrzeit (Kurzzeit)"
       },
+      "state_of_charge": {
+        "name": "Batterie"
+      },
       "tyre_pressure_actual_front_left": {
         "name": "Reifendruck vorne links"
       },
@@ -312,6 +330,12 @@
           "off": "Aus",
           "on": "Ein"
         }
+      },
+      "window_heating_state_front": {
+        "name": "Scheibenheizung vorne"
+      },
+      "window_heating_state_rear": {
+        "name": "Scheibenheizung hinten"
       }
     },
     "binary_sensor": {

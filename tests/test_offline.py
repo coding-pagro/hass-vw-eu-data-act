@@ -181,6 +181,44 @@ def main() -> int:
     check("locked is curated", "locked" in data.CURATED_FIELDS, True)
     _mintemp = next(s for s in data.CURATED_SENSORS_FLAT if s.field_name == "min_temperature")
     check("min_temperature named battery", _mintemp.name, "Battery min temperature")
+    check("flat SoC is curated", "state_of_charge" in data.CURATED_FIELDS, True)
+    check("alias is curated too", "hv_soc" in data.CURATED_FIELDS, True)
+    check("plug state is curated", "plug_state" in data.CURATED_FIELDS, True)
+
+    # --- curated alias chains (cf. evcc's eudataact lookup) ---------------
+    print("curated aliases:")
+    _soc = next(s for s in data.CURATED_SENSORS_FLAT if s.field_name == "state_of_charge")
+    check("soc alias chain", _soc.aliases, ("hv_soc", "battery_level_HV.value"))
+    ds_alias = data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+        {"key": "a1", "dataFieldName": "hv_soc", "value": "73"},
+    ]})
+    dp = data.find_curated(ds_alias.points, _soc)
+    check("alias fills in for missing primary", dp.value if dp else None, 73)
+    ds_both = data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+        {"key": "a1", "dataFieldName": "hv_soc", "value": "73"},
+        {"key": "a2", "dataFieldName": "state_of_charge", "value": "74"},
+    ]})
+    dp = data.find_curated(ds_both.points, _soc)
+    check("primary wins over alias", dp.value if dp else None, 74)
+    check("no match -> None", data.find_curated({}, _soc), None)
+
+    # --- remaining-time sentinel (uint16 max = "no estimate") -------------
+    print("remaining-time sentinel:")
+    check("65535 int is sentinel", data.is_remaining_time_sentinel(65535), True)
+    check("65535.0 float is sentinel", data.is_remaining_time_sentinel(65535.0), True)
+    check("'65535' str is sentinel", data.is_remaining_time_sentinel("65535"), True)
+    check("1800 is not", data.is_remaining_time_sentinel(1800), False)
+    check("None is not", data.is_remaining_time_sentinel(None), False)
+    check("text is not", data.is_remaining_time_sentinel("CHARGING"), False)
+    _rct = next(
+        s for s in data.CURATED_SENSORS_DOTTED
+        if s.field_name == "battery_state_report.remaining_charging_time_complete"
+    )
+    check("dotted remaining time filtered", _rct.transform, "remaining_time")
+    _rcf = next(
+        s for s in data.CURATED_SENSORS_FLAT if s.field_name == "remaining_charging_time"
+    )
+    check("flat remaining time filtered", _rcf.transform, "remaining_time")
 
     # --- binary state decoding (encoding-driven, not field-name guessing) -
     print("binary decode:")

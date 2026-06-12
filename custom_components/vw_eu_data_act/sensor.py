@@ -27,7 +27,9 @@ from .data import (
     enum_option_key,
     enum_options_for_field,
     find_by_field,
+    find_curated,
     friendly_name,
+    is_remaining_time_sentinel,
     latest_captured_time,
     resolve_distance_unit,
     shorten_enum_label,
@@ -53,9 +55,12 @@ async def async_setup_entry(
         CURATED_BINARY_DOTTED if format_type == "dotted" else CURATED_BINARY_FLAT
     )
 
-    # Build field sets for exclusion from raw sensors
+    # Build field sets for exclusion from raw sensors (aliases too: a field
+    # feeding a curated sensor must not also appear as a raw diagnostic)
     binary_fields = {b.field_name for b in curated_binary}
-    curated_sensor_fields = {s.field_name for s in curated_sensors}
+    curated_sensor_fields = {s.field_name for s in curated_sensors} | {
+        a for s in curated_sensors for a in s.aliases
+    }
 
     entities: list[SensorEntity] = []
 
@@ -70,7 +75,9 @@ async def async_setup_entry(
             # "Last connected" sensor (Last vehicle update covers those).
             if base_dp is not None and base_dp.timestamp is not None:
                 entities.append(EudaCuratedSensor(coordinator, curated))
-        elif curated.field_name in present_fields:
+        elif curated.field_name in present_fields or any(
+            a in present_fields for a in curated.aliases
+        ):
             entities.append(EudaCuratedSensor(coordinator, curated))
 
     # raw diagnostic sensors: every other unique key
@@ -143,7 +150,7 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
                 return self._sticky(dp.timestamp)
             return self._sticky(None)
 
-        dp = find_by_field(self.coordinator.data or {}, self._curated.field_name)
+        dp = find_curated(self.coordinator.data or {}, self._curated)
 
         if not dp:
             return self._sticky(None)
@@ -169,6 +176,15 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
 
                 transformed = fuel_consumption_l_per_1000km_to_l_per_100km(raw_value)
                 return self._sticky(transformed)
+
+            elif self._curated.transform == "remaining_time":
+                # 65535 = "no estimate" (not charging). That is a real reading
+                # meaning unknown, so reset stickiness instead of freezing the
+                # last estimate on the sensor forever.
+                if raw_value is not None and is_remaining_time_sentinel(raw_value):
+                    self._last_value = None
+                    return None
+                return self._sticky(raw_value)
 
         if self._enum_options is not None:
             return self._sticky(self._enum_state(raw_value))
