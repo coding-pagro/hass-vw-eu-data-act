@@ -23,7 +23,7 @@ from .const import (
     POST_DATASET_BUFFER,
     RETRY_INTERVAL,
 )
-from .data import Dataset, DataPoint
+from .data import Dataset, DataPoint, merge_points
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,9 +127,14 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                         self.vin, self.identifier, dataset_entry["name"]
                     )
                     self.latest_dataset = Dataset.from_json(payload)
-                    self.dataset_created_at = (
-                        _created_on(dataset_entry) or self.dataset_created_at
-                    )
+                    # max(): a fallback download of an *older* dataset must not
+                    # regress the "Dataset generated" timestamp sensor.
+                    created = _created_on(dataset_entry)
+                    if created and (
+                        self.dataset_created_at is None
+                        or created > self.dataset_created_at
+                    ):
+                        self.dataset_created_at = created
                     self._is_initial_setup = False
                     last_error = None
                     break  # Success!
@@ -193,11 +198,11 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
 
         self._reschedule(listing)
 
-        # Merge new data with existing to preserve missing fields
+        # Merge new data with existing to preserve missing fields. The download
+        # loop may have fallen back to an *older* dataset, so the merge is
+        # timestamp-aware: a point never overwrites a strictly newer one.
         if self.data:
-            merged = dict(self.data)
-            merged.update(self.latest_dataset.points)
-            return merged
+            return merge_points(self.data, self.latest_dataset.points)
 
         # First successful load
         return self.latest_dataset.points
@@ -242,8 +247,13 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                     last_error = err
                     is_server_error = _is_server_error(err)
 
+                    # 4xx etc. won't change on an immediate retry; only
+                    # transient 5xx are worth hammering the endpoint for.
+                    if not is_server_error:
+                        break
+
                     # Retry server errors with delay
-                    if is_server_error and attempt < max_retries - 1:
+                    if attempt < max_retries - 1:
                         _LOGGER.debug(
                             "Server error listing datasets (attempt %d/%d): %s, retrying in %ds",
                             attempt + 1,

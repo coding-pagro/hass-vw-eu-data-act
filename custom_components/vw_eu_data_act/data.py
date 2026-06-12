@@ -331,6 +331,32 @@ def find_by_field(
     return min(matches, key=_key)
 
 
+def merge_points(
+    existing: dict[str, "DataPoint"], incoming: dict[str, "DataPoint"]
+) -> dict[str, "DataPoint"]:
+    """Merge a dataset's points over previously accumulated ones.
+
+    The coordinator falls back to older datasets when the newest download
+    fails, so the incoming points are not guaranteed to be fresher than what
+    we already have. A plain dict.update() would overwrite a newer reading
+    with a stale one under the same UUID key (backward jumps in mileage/SoC).
+
+    An incoming point is skipped only when both sides carry a timestampUtc and
+    the incoming one is strictly older. When either side lacks a timestamp we
+    cannot tell, and fields without timestamps must keep updating every cycle,
+    so the incoming point wins (the previous behavior).
+    """
+    merged = dict(existing)
+    for key, dp in incoming.items():
+        old = merged.get(key)
+        if old is not None:
+            old_ts, new_ts = old.timestamp, dp.timestamp
+            if old_ts is not None and new_ts is not None and new_ts < old_ts:
+                continue  # stale snapshot; keep the fresher point we already have
+        merged[key] = dp
+    return merged
+
+
 def _parse_timestamp(raw: str) -> datetime | None:
     """Parse the various timestamp encodings seen in datasets.
 
