@@ -175,6 +175,70 @@ def main() -> int:
     check("new key added", m["k2"].raw_value, "300")
     check("untouched key survives", m["k1"].raw_value, "1")
 
+    # --- cross-dataset freshness (the real soc/mileage jump bug) ----------
+    # Real datasets attach NO per-item timestampUtc to value fields; freshness
+    # is the dataset's car_captured_time. Across datasets, soc/mileage land in
+    # different stable UUID slots, so the newest dataset must win regardless of
+    # which slot holds the value (no more arbitrary smallest-key pick, no stale
+    # slot surviving as a backward jump).
+    print("cross-dataset freshness:")
+
+    def _snapshot(captured, soc_key, soc, mil_key, mil):
+        return data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+            {"key": "cct", "dataFieldName": "car_captured_time", "value": captured},
+            {"key": soc_key, "dataFieldName": "battery_state_report.soc", "value": soc},
+            {"key": mil_key, "dataFieldName": "mileage.value", "value": mil},
+        ]})
+
+    older = _snapshot("2026-06-11T04:00:00Z", "506cb83e", "71", "30cc36fd", "70805")
+    newer = _snapshot("2026-06-11T05:00:00Z", "7bddd5e7", "62", "75d65f00", "70811")
+
+    # value points inherit the dataset capture time as their freshness
+    check("value point stamped with captured_at", newer.points["7bddd5e7"].captured_at is not None, True)
+    check("freshness falls back to captured_at", newer.points["7bddd5e7"].freshness, newer.captured_at)
+
+    merged = data.merge_points(older.points, newer.points)
+    check("soc: newest dataset wins across slots",
+          data.find_by_field(merged, "battery_state_report.soc").raw_value, "62")
+    check("mileage: newest dataset wins across slots",
+          data.find_by_field(merged, "mileage.value").raw_value, "70811")
+
+    # stale dataset arriving LATER (restart backfill / out-of-order) must not regress
+    merged_rev = data.merge_points(newer.points, older.points)
+    check("soc: stale later dataset does not win",
+          data.find_by_field(merged_rev, "battery_state_report.soc").raw_value, "62")
+    check("mileage: no backward jump from stale slot",
+          data.find_by_field(merged_rev, "mileage.value").raw_value, "70811")
+
+    # same slot, stale refresh arriving later is rejected by merge_points
+    stale_same = _snapshot("2026-06-11T03:00:00Z", "7bddd5e7", "99", "75d65f00", "70700")
+    m_same = data.merge_points(newer.points, stale_same.points)
+    check("same-slot stale refresh rejected (soc)",
+          data.find_by_field(m_same, "battery_state_report.soc").raw_value, "62")
+    check("same-slot stale refresh rejected (mileage)",
+          data.find_by_field(m_same, "mileage.value").raw_value, "70811")
+
+    # monotonic odometer: two mileage slots with the SAME capture time but
+    # different values (lagging report snapshots, e.g. 70876 vs the car's real
+    # 70908) -> the highest is the truth; default (non-monotonic) selection
+    # would keep the stale smaller-key 70876.
+    print("monotonic mileage:")
+    twin = data.Dataset.from_json({"vin": "V", "user_id": "u", "Data": [
+        {"key": "cct", "dataFieldName": "car_captured_time", "value": "2026-06-13T16:06:37Z"},
+        {"key": "30cc36fd", "dataFieldName": "mileage.value", "value": "70876"},
+        {"key": "75d65f00", "dataFieldName": "mileage.value", "value": "70908"},
+    ]})
+    check("default pick = smallest key (stale)",
+          data.find_by_field(twin.points, "mileage.value").raw_value, "70876")
+    check("monotonic pick = max value",
+          data.find_by_field(twin.points, "mileage.value", prefer_max_value=True).raw_value, "70908")
+    mileage_curated = next(
+        s for s in data.CURATED_SENSORS_DOTTED if s.field_name == "mileage.value"
+    )
+    check("mileage curated flagged monotonic", mileage_curated.monotonic, True)
+    check("find_curated picks max for monotonic mileage",
+          data.find_curated(twin.points, mileage_curated).raw_value, "70908")
+
     # --- curated / raw classification ------------------------------------
     print("curated registry:")
     check("soc is curated", "battery_state_report.soc" in data.CURATED_FIELDS, True)

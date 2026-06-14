@@ -106,6 +106,11 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
         self.vin: str = entry.data[CONF_VIN]
         self.identifier: str = entry.data[CONF_IDENTIFIER]
         self.latest_dataset: Dataset | None = None
+        # Untouched JSON of the most recently downloaded dataset, kept solely
+        # for diagnostics: from_json discards per-item fields (message_id, the
+        # per-snapshot car_captured_time grouping) that are needed to reason
+        # about duplicate-slot freshness. Memory-only; never persisted.
+        self.latest_raw: dict | None = None
         # createdOn of the newest successfully downloaded dataset (portal-side
         # freshness, as opposed to Dataset.captured_at = car-side freshness).
         self.dataset_created_at: datetime | None = None
@@ -196,6 +201,7 @@ class EudaCoordinator(DataUpdateCoordinator[dict[str, DataPoint]]):
                     )
                     break
                 else:
+                    self.latest_raw = payload
                     self.latest_dataset = Dataset.from_json(payload)
                     merged = merge_points(merged, self.latest_dataset.points)
                     # max() keeps the mark monotonic even if the portal lists

@@ -4,3 +4,7 @@ __pycache__/
 
 # Captured browser session — contains live auth cookies / OAuth codes. Never commit.
 *.har
+
+# Real vehicle datasets used for debugging — contain VIN/user_id. Keep local.
+samples/
+*.zip
