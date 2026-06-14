@@ -246,6 +246,13 @@ class DataPoint:
     description: str | None = None
     cluster: str | None = None
     timestamp_utc: str | None = None
+    # The capture moment of the dataset this point came from (its newest
+    # car_captured_time). Real datasets attach NO per-item timestampUtc to value
+    # fields like soc/mileage — freshness lives in a sibling car_captured_time
+    # for the whole snapshot. Stamping it here lets find_by_field/merge_points
+    # pick the value from the newest dataset regardless of which (stable) UUID
+    # slot it landed in, instead of an arbitrary smallest-key slot.
+    captured_at: datetime | None = None
 
     @property
     def value(self):
@@ -262,6 +269,18 @@ class DataPoint:
     def timestamp(self) -> datetime | None:
         """Parse the timestampUtc field into a datetime object."""
         return _parse_timestamp(self.timestamp_utc) if self.timestamp_utc else None
+
+    @property
+    def freshness(self) -> datetime | None:
+        """Effective freshness for cross-snapshot selection.
+
+        Prefers the point's own timestampUtc (rare), falling back to the
+        dataset's car_captured_time. This is what find_by_field and
+        merge_points rank on, so the newest dataset always wins — kept separate
+        from ``timestamp`` so the per-field ``*.timestamp`` sensors keep
+        reflecting only a real per-item timestampUtc.
+        """
+        return self.timestamp or self.captured_at
 
 
 @dataclass
@@ -293,11 +312,18 @@ class Dataset:
                 cluster=meta.get("cluster") or None,
                 timestamp_utc=item.get("timestampUtc") or None,
             )
+        captured = latest_captured_time(points)
+        # Stamp every point with the dataset's capture moment so freshness-based
+        # selection works for the value fields (soc, mileage, ...) that carry no
+        # per-item timestampUtc of their own.
+        if captured is not None:
+            for dp in points.values():
+                dp.captured_at = captured
         return cls(
             vin=payload.get("vin", ""),
             user_id=payload.get("user_id"),
             points=points,
-            captured_at=latest_captured_time(points),
+            captured_at=captured,
         )
 
     def by_field(self, field_name: str) -> DataPoint | None:
@@ -306,29 +332,50 @@ class Dataset:
 
 
 def find_by_field(
-    points: dict[str, "DataPoint"], field_name: str
+    points: dict[str, "DataPoint"], field_name: str, *, prefer_max_value: bool = False
 ) -> "DataPoint | None":
     """Pick a single data point for a (possibly duplicated) field name.
 
-    The portal merges several report snapshots into one flat array. The same
-    field can appear multiple times under different UUIDs with different
-    ``timestampUtc`` values. We prefer the entry with the **newest**
-    ``timestampUtc`` so we always surface the most recent reading rather than
-    an older snapshot that would look like a backward jump in mileage or SoC.
-    The smallest key is used only as a stable tiebreaker when timestamps are
-    equal or absent.
+    The same field appears under several stable UUIDs (one per report type the
+    portal can emit) and accumulates across datasets in the merged store. We
+    prefer the entry with the **newest** freshness (its dataset's
+    car_captured_time, since value fields carry no per-item timestampUtc) so we
+    always surface the most recent reading rather than a stale slot that would
+    look like a backward jump in mileage or an oscillation in SoC. The smallest
+    key is used only as a stable tiebreaker when freshness is equal or absent.
+
+    ``prefer_max_value`` is for monotonic fields (the odometer): the same
+    dataset carries two ``mileage.value`` slots from different report snapshots
+    that lag each other (e.g. 70876 vs 70908 for the same capture time), so the
+    **highest** reading is the truest current value. With it set, the largest
+    numeric value wins outright (freshness/key only break exact-value ties).
     """
     matches = [dp for dp in points.values() if dp.field_name == field_name]
     if not matches:
         return None
 
-    def _key(dp: "DataPoint"):
-        ts = dp.timestamp  # tz-aware datetime or None
+    def _freshness_rank(dp: "DataPoint"):
+        ts = dp.freshness  # tz-aware datetime or None
         if ts is None:
-            return (1, 0.0, dp.key)  # no timestamp: prefer entries that have one
-        return (0, -ts.timestamp(), dp.key)  # newest first; smallest key as tiebreaker
+            return (1, 0.0)  # no freshness: prefer entries that have one
+        return (0, -ts.timestamp())  # newest first
+
+    def _key(dp: "DataPoint"):
+        if prefer_max_value:
+            num = _as_float(dp.raw_value)
+            # highest value first; numeric beats non-numeric; then freshest, then key
+            val_rank = -num if num is not None else float("inf")
+            return (val_rank, *_freshness_rank(dp), dp.key)
+        return (*_freshness_rank(dp), dp.key)
 
     return min(matches, key=_key)
+
+
+def _as_float(raw) -> float | None:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def merge_points(
@@ -341,16 +388,17 @@ def merge_points(
     we already have. A plain dict.update() would overwrite a newer reading
     with a stale one under the same UUID key (backward jumps in mileage/SoC).
 
-    An incoming point is skipped only when both sides carry a timestampUtc and
-    the incoming one is strictly older. When either side lacks a timestamp we
-    cannot tell, and fields without timestamps must keep updating every cycle,
-    so the incoming point wins (the previous behavior).
+    An incoming point is skipped only when both sides carry a freshness
+    (dataset car_captured_time, or a rare per-item timestampUtc) and the
+    incoming one is strictly older. When either side lacks freshness we cannot
+    tell, so the incoming point wins (fields without any timestamp must keep
+    updating every cycle).
     """
     merged = dict(existing)
     for key, dp in incoming.items():
         old = merged.get(key)
         if old is not None:
-            old_ts, new_ts = old.timestamp, dp.timestamp
+            old_ts, new_ts = old.freshness, dp.freshness
             if old_ts is not None and new_ts is not None and new_ts < old_ts:
                 continue  # stale snapshot; keep the fresher point we already have
         merged[key] = dp
@@ -515,7 +563,7 @@ def find_curated(
     model generations that deliver the value under a different name.
     """
     for name in (curated.field_name, *curated.aliases):
-        dp = find_by_field(points, name)
+        dp = find_by_field(points, name, prefer_max_value=curated.monotonic)
         if dp is not None:
             return dp
     return None
@@ -553,6 +601,10 @@ class CuratedSensor:
     # curated sensor can bind to the first of several candidates (the entity's
     # unique_id and translation key always derive from ``field_name``).
     aliases: tuple[str, ...] = ()
+    # monotonic non-decreasing fields (the odometer): pick the highest of the
+    # duplicate slots (the truest current reading) and never let the sensor
+    # regress. See find_by_field(prefer_max_value=...) and entity.py _sticky.
+    monotonic: bool = False
 
 
 @dataclass(frozen=True)
@@ -684,6 +736,7 @@ CURATED_SENSORS_DOTTED: tuple[CuratedSensor, ...] = (
         unit_field="mileage.unit",
         unit_resolver="distance",
         suggested_display_precision=0,
+        monotonic=True,
     ),
     CuratedSensor(
         "range.value",
@@ -810,6 +863,7 @@ CURATED_SENSORS_FLAT: tuple[CuratedSensor, ...] = (
         "total_increasing",
         icon="mdi:counter",
         suggested_display_precision=0,
+        monotonic=True,
     ),
     CuratedSensor(
         "cruising_range_combined",

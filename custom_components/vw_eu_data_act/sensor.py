@@ -100,6 +100,7 @@ class EudaCuratedSensor(EudaEntity, SensorEntity):
     def __init__(self, coordinator: EudaCoordinator, curated: CuratedSensor) -> None:
         super().__init__(coordinator)
         self._curated = curated
+        self._monotonic = curated.monotonic
         self._attr_unique_id = f"{coordinator.vin}_{curated.field_name}"
         # Name and (for enums) states come from the translation files; see
         # tools/gen_translations.py. curated.name is the English source string.

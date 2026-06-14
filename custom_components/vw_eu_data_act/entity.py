@@ -13,6 +13,9 @@ class EudaEntity(CoordinatorEntity[EudaCoordinator]):
     """Common base: shares one device per VIN."""
 
     _attr_has_entity_name = True
+    # Opt-in (set by monotonic curated sensors, e.g. the odometer): never let
+    # the reported value drop below the last shown one.
+    _monotonic = False
 
     def __init__(self, coordinator: EudaCoordinator) -> None:
         super().__init__(coordinator)
@@ -42,6 +45,17 @@ class EudaEntity(CoordinatorEntity[EudaCoordinator]):
         return self.coordinator.data is not None
 
     def _sticky(self, value):
-        """Return ``value``, or the last known value if this update omits it."""
+        """Return ``value``, or the last known value if this update omits it.
+
+        For monotonic sensors (the odometer) also clamp downward: a value below
+        the last shown one is a stale snapshot leaking through, never a real
+        decrease, so keep the higher previous reading.
+        """
+        if self._monotonic and value is not None and self._last_value is not None:
+            try:
+                if float(value) < float(self._last_value):
+                    return self._last_value
+            except (TypeError, ValueError):
+                pass
         self._last_value = sticky(self._last_value, value)
         return self._last_value
